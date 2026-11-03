@@ -1,0 +1,31 @@
+ticker,nombre,sector,indice,tv
+ECL.SN,Engie Energía Chile,Energía,IPSA,BCS:ECL
+ILC.SN,ILC,Holding · Seguros,IPSA,BCS:ILC
+ENELCHILE.SN,Enel Chile,Energía,IPSA,BCS:ENELCHILE
+PARAUCO.SN,Parque Arauco,Inmobiliario,IPSA,BCS:PARAUCO
+ANDINA-B.SN,Embotelladora Andina,Bebidas,IPSA,BCS:ANDINA_B
+VAPORES.SN,CSAV,Holding · Transporte,IPSA,BCS:VAPORES
+ITAUCL.SN,Banco Itaú Chile,Banco,IPSA,BCS:ITAUCL
+BSANTANDER.SN,Banco Santander Chile,Banco,IPSA,BCS:BSANTANDER
+CHILE.SN,Banco de Chile,Banco,IPSA,BCS:CHILE
+QUINENCO.SN,Quiñenco,Holding · Banco,IPSA,BCS:QUINENCO
+COPEC.SN,Copec,Energía,IPSA,BCS:COPEC
+SQM-B.SN,SQM-B,Minería,IPSA,BCS:SQM_B
+FALABELLA.SN,Falabella,Retail,IPSA,BCS:FALABELLA
+CENCOSUD.SN,Cencosud,Retail,IPSA,BCS:CENCOSUD
+BCI.SN,Banco BCI,Banco,IPSA,BCS:BCI
+CMPC.SN,CMPC,Forestal,IPSA,BCS:CMPC
+CCU.SN,CCU,Bebidas,IPSA,BCS:CCU
+COLBUN.SN,Colbún,Energía,IPSA,BCS:COLBUN
+CAP.SN,CAP,Minería,IPSA,BCS:CAP
+LTM.SN,Latam Airlines,Transporte,IPSA,BCS:LTM
+MALLPLAZA.SN,Mallplaza,Inmobiliario,IPSA,BCS:MALLPLAZA
+ENELAM.SN,Enel Américas,Energía,IPSA,BCS:ENELAM
+AGUAS-A.SN,Aguas Andinas,Servicios básicos,IPSA,BCS:AGUAS_A
+IAM.SN,Inversiones Aguas Metropolitanas,Servicios básicos,IGPA,BCS:IAM
+RIPLEY.SN,Ripley,Retail,IGPA,BCS:RIPLEY
+SMU.SN,SMU,Retail,IGPA,BCS:SMU
+ENTEL.SN,Entel,Telecomunicaciones,IGPA,BCS:ENTEL
+CONCHATORO.SN,Viña Concha y Toro,Bebidas,IGPA,BCS:CONCHATORO
+SONDA.SN,Sonda,Tecnología,IGPA,BCS:SONDA
+SALFACORP.SN,Salfacorp,Construcción,IGPA,BCS:SALFACORP
