@@ -1,5 +1,4 @@
 import io
-import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 
@@ -408,70 +407,24 @@ with tab4:
 # ===== Pestaña Gráficos =====
 with tab_g:
     st.subheader("Gráfico de una acción")
-    c1, c2, c3 = st.columns([2, 2, 3])
-    sel_g = c1.selectbox("Acción", emp_f["nemo"], key="graf_emp")
-    tipo_g = c2.radio("Gráfico", ["Simple (escala logarítmica)", "Avanzado (indicadores)"], key="graf_tipo")
+    sel_g = st.selectbox("Acción", emp_f["nemo"], key="graf_emp")
     simbolo_tv = emp_f.loc[emp_f["nemo"] == sel_g, "tv"].iloc[0]
+    st.caption("Escala logarítmica: botón 'log' abajo a la derecha del gráfico. Los indicadores se agregan desde la barra superior.")
 
-    if tipo_g.startswith("Simple"):
-        estilo_g = c3.radio("Estilo", ["Velas", "Línea", "Área"], horizontal=True, key="graf_estilo")
-        tipo_serie = {"Velas": "candlesticks", "Línea": "line", "Área": "area"}[estilo_g]
-        config = {
-            "symbols": [[sel_g, simbolo_tv + "|12M"]],
-            "chartOnly": False,
-            "width": "100%",
-            "height": 560,
-            "locale": "es",
-            "colorTheme": "light",
-            "autosize": False,
-            "showVolume": True,
-            "showMA": False,
-            "hideDateRanges": False,
-            "hideMarketStatus": False,
-            "hideSymbolLogo": False,
-            "scalePosition": "right",
-            "scaleMode": "Logarithmic",
-            "fontFamily": "-apple-system, BlinkMacSystemFont, Trebuchet MS, Roboto, Ubuntu, sans-serif",
-            "fontSize": "10",
-            "noTimeScale": False,
-            "valuesTracking": "1",
-            "changeMode": "price-and-percent",
-            "chartType": tipo_serie,
-            "maLineColor": "#2962FF",
-            "maLineWidth": 1,
-            "maLength": 9,
-            "lineWidth": 2,
-            "lineType": 0,
-            "dateRanges": ["1m|30", "3m|60", "12m|1D", "60m|1W", "all|1M"],
-        }
-        html_g = f"""
-        <div class="tradingview-widget-container">
-          <div class="tradingview-widget-container__widget"></div>
-          <div class="tradingview-widget-copyright" style="font-family:sans-serif;font-size:12px;padding-top:6px;">
-            <a href="https://es.tradingview.com/" rel="noopener nofollow" target="_blank">Seguimiento de todos los mercados en TradingView</a>
-          </div>
-          <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-symbol-overview.js" async>
-          {json.dumps(config)}
-          </script>
-        </div>
-        """
-        components.html(html_g, height=640)
-    else:
-        st.caption("En este gráfico la escala logarítmica se activa con el botón 'log' abajo a la derecha del gráfico.")
-        html_g = f"""
-        <div id="grafico" style="height:520px;"></div>
-        <script src="https://s3.tradingview.com/tv.js"></script>
-        <script>
-        new TradingView.widget({{
-          "autosize": true,
-          "symbol": "{simbolo_tv}",
-          "interval": "D",
-          "timezone": "America/Santiago",
-          "theme": "light",
-          "style": "1",
-          "locale": "es",
-          "container_id": "grafico"
-        }});
-        </script>
-        """
-        components.html(html_g, height=540)
+    html_g = f"""
+    <div id="grafico" style="height:640px;"></div>
+    <script src="https://s3.tradingview.com/tv.js"></script>
+    <script>
+    new TradingView.widget({{
+      "autosize": true,
+      "symbol": "{simbolo_tv}",
+      "interval": "D",
+      "timezone": "America/Santiago",
+      "theme": "light",
+      "style": "1",
+      "locale": "es",
+      "container_id": "grafico"
+    }});
+    </script>
+    """
+    components.html(html_g, height=660)
