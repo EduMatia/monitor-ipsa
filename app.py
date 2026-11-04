@@ -233,8 +233,8 @@ tabla[["Precio"] + columnas_pct] = tabla[["Precio"] + columnas_pct].astype(float
 tabla = tabla.sort_values("YTD (c/div.)", ascending=False).reset_index(drop=True)
 
 # ---------- Pestañas ----------
-tab1, tab_g, tab2, tab3, tab4 = st.tabs(
-    ["Rendimientos", "Gráficos", "Dividendos", "Calendario de resultados", "Rendimientos TradingView"]
+tab1, tab_g, tab2, tab3 = st.tabs(
+    ["Rendimientos", "Gráficos", "Dividendos", "Calendario de resultados"]
 )
 
 # ===== Pestaña 1: Rendimientos =====
@@ -421,36 +421,6 @@ with tab3:
         sin = base[base[list(PERIODOS)].isna().all(axis=1)]["ticker"].str.replace(".SN", "", regex=False).str.upper().tolist()
         if sin:
             st.caption("Sin fechas en la CMF: " + ", ".join(sin))
-
-# ===== Pestaña 4: Screener de TradingView (rendimientos por periodo) =====
-with tab4:
-    st.subheader("Rendimientos según TradingView")
-    st.caption(
-        "Tabla incrustada de TradingView con todas las acciones de la Bolsa de Santiago. "
-        "Los datos son de TradingView (con retraso), no de Yahoo. "
-        "Si no ves las columnas de rendimiento, cambia a la vista 'Performance' dentro de la tabla."
-    )
-    tv_html = """
-    <div class="tradingview-widget-container">
-      <div class="tradingview-widget-container__widget"></div>
-      <div class="tradingview-widget-copyright" style="font-family:sans-serif;font-size:12px;padding-top:6px;">
-        <a href="https://es.tradingview.com/" rel="noopener nofollow" target="_blank">Seguimiento de todos los mercados en TradingView</a>
-      </div>
-      <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-screener.js" async>
-      {
-        "width": "100%",
-        "height": 640,
-        "defaultColumn": "performance",
-        "defaultScreen": "general",
-        "market": "chile",
-        "showToolbar": true,
-        "colorTheme": "light",
-        "locale": "es"
-      }
-      </script>
-    </div>
-    """
-    components.html(tv_html, height=700, scrolling=True)
 
 # ===== Pestaña Gráficos =====
 with tab_g:
