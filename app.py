@@ -47,9 +47,11 @@ def cargar_precios(tickers):
     datos = yf.download(list(tickers), start=inicio, auto_adjust=False, progress=False)
     cierre = datos["Close"]
     ajustado = datos["Adj Close"]  # precio que incluye dividendos
+    volumen = datos["Volume"]
     cierre.index = pd.to_datetime(cierre.index).tz_localize(None)
     ajustado.index = pd.to_datetime(ajustado.index).tz_localize(None)
-    return cierre, ajustado
+    volumen.index = pd.to_datetime(volumen.index).tz_localize(None)
+    return cierre, ajustado, volumen
 
 
 @st.cache_data(ttl=21600)  # 6 horas
@@ -76,7 +78,7 @@ def cargar_cotizaciones(tickers):
             pass
         return t, None
 
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=6) as ex:
         return dict(ex.map(uno, tickers))
 
 
@@ -100,6 +102,14 @@ def cargar_fechas_cmf():
     raise ValueError("No encontré la tabla de fechas en la página de la CMF")
 
 
+def solo_con_transacciones(serie, vol):
+    """Quita los días sin transacciones (volumen 0), donde Yahoo repite el precio anterior."""
+    if vol is None:
+        return serie
+    con = serie[vol.reindex(serie.index).fillna(0) > 0]
+    return con if len(con) >= 2 else serie
+
+
 def retorno(serie, fecha_ref, ultimo=None):
     """Cambio porcentual entre el cierre de fecha_ref y el último precio."""
     previo = serie.loc[:fecha_ref]
@@ -116,7 +126,7 @@ empresas = cargar_empresas()
 
 # ---------- Filtros (valen para todas las pestañas) ----------
 col1, col2 = st.columns(2)
-indice = col1.selectbox("Índice", ["IPSA", "IGPA (todas)"])
+indice = col1.selectbox("Acciones", ["IPSA", "Todas (IPSA + otras)"])
 sector_sel = col2.multiselect("Sector (opcional)", sorted(empresas["sector"].unique()))
 
 emp_f = empresas.copy()
@@ -127,13 +137,14 @@ if sector_sel:
 if emp_f.empty:
     st.warning("No hay empresas con esos filtros.")
     st.stop()
+emp_f = emp_f.assign(nemo=emp_f["ticker"].str.replace(".SN", "", regex=False).str.upper())
 
 # ---------- Precios y tabla de rendimientos ----------
 try:
     with st.spinner("Descargando precios..."):
-        cierre, ajustado = cargar_precios(tuple(empresas["ticker"]))
+        cierre, ajustado, volumen = cargar_precios(tuple(empresas["ticker"]))
 except Exception as e:
-    cierre, ajustado = pd.DataFrame(), pd.DataFrame()
+    cierre, ajustado, volumen = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
     st.warning(f"No se pudieron descargar los precios de Yahoo: {e}")
 
 try:
@@ -151,7 +162,7 @@ fechas = {
 }
 
 COLUMNAS = [
-    "Empresa", "Ticker", "Sector", "Índice", "Precio", "Var. hoy", "Var. semana",
+    "Empresa", "Nemotécnico", "Ticker", "Sector", "Índice", "Precio", "Var. hoy", "Var. semana",
     "MTD", "1 mes", "3 meses", "YTD (precio)", "YTD (c/div.)", "1 año",
 ]
 columnas_pct = [
@@ -164,8 +175,9 @@ for _, e in empresas.iterrows():
     t = e["ticker"]
     if t not in cierre.columns:
         continue
-    c = cierre[t].dropna()
-    a = ajustado[t].dropna()
+    vol = volumen[t] if t in volumen.columns else None
+    c = solo_con_transacciones(cierre[t].dropna(), vol)
+    a = solo_con_transacciones(ajustado[t].dropna(), vol)
     if len(c) < 2:
         continue
     cot = cotizaciones.get(t)
@@ -175,6 +187,7 @@ for _, e in empresas.iterrows():
         ultimo, cierre_prev = c.iloc[-1], c.iloc[-2]
     fila = {
         "Empresa": e["nombre"],
+        "Nemotécnico": t.replace(".SN", "").upper(),
         "Ticker": t,
         "Sector": e["sector"],
         "Índice": e["indice"],
@@ -201,28 +214,28 @@ with tab1:
     else:
         mejor, peor = tabla.iloc[0], tabla.iloc[-1]
         m1, m2 = st.columns(2)
-        m1.metric("Mejor del año (c/div.)", mejor["Empresa"], pct_cl(mejor["YTD (c/div.)"]))
-        m2.metric("Peor del año (c/div.)", peor["Empresa"], pct_cl(peor["YTD (c/div.)"]))
+        m1.metric("Mejor del año (c/div.)", mejor["Nemotécnico"], pct_cl(mejor["YTD (c/div.)"]))
+        m2.metric("Peor del año (c/div.)", peor["Nemotécnico"], pct_cl(peor["YTD (c/div.)"]))
 
         def color(valor):
             if pd.isna(valor):
                 return ""
             return "color: #1a7f4b" if valor > 0 else "color: #c0392b" if valor < 0 else ""
 
+        vista = tabla.drop(columns=["Empresa", "Ticker"])  # el nombre y el .SN son internos, no se muestran
         estilo = (
-            tabla.style
+            vista.style
             .map(color, subset=columnas_pct)
-            .format({c: pct_cl for c in columnas_pct})
-            .format({"Precio": lambda v: "$" + num_cl(v, 2)})
+            .format({**{c: pct_cl for c in columnas_pct}, "Precio": lambda v: "$" + num_cl(v, 2)})
         )
         st.dataframe(estilo, use_container_width=True, hide_index=True, height=520)
 
         st.subheader("Rendimiento en el año (con dividendos)")
-        st.bar_chart(tabla.set_index("Empresa")["YTD (c/div.)"])
+        st.bar_chart(tabla.set_index("Nemotécnico")["YTD (c/div.)"])
 
         st.subheader("Gráfico de una acción")
-        nombre_sel = st.selectbox("Elige una empresa", tabla["Empresa"], key="graf_emp")
-        ticker_sel = tabla.loc[tabla["Empresa"] == nombre_sel, "Ticker"].iloc[0]
+        nombre_sel = st.selectbox("Elige una acción", tabla["Nemotécnico"], key="graf_emp")
+        ticker_sel = tabla.loc[tabla["Nemotécnico"] == nombre_sel, "Ticker"].iloc[0]
         simbolo_tv = empresas.loc[empresas["ticker"] == ticker_sel, "tv"].iloc[0]
 
         html = f"""
@@ -244,17 +257,17 @@ with tab1:
         components.html(html, height=540)
 
         with st.expander("Diagnóstico (datos crudos)"):
-            tk = st.selectbox("Acción", emp_f["ticker"], key="diag_tk")
+            tk = st.selectbox("Acción", emp_f["ticker"], key="diag_tk", format_func=lambda x: x.replace(".SN", ""))
             st.write("Cotización según Yahoo (precio actual, cierre anterior):", cotizaciones.get(tk))
             if tk in cierre.columns:
-                st.write("Últimos cierres diarios descargados:")
-                st.dataframe(cierre[tk].dropna().tail(6))
+                st.write("Últimos días descargados (cierre y volumen):")
+                st.dataframe(pd.DataFrame({"Cierre": cierre[tk], "Volumen": volumen[tk]}).dropna(subset=["Cierre"]).tail(8))
 
 # ===== Pestaña 2: Dividendos =====
 with tab2:
     st.subheader("Dividendos pagados (según Yahoo Finance)")
-    nombre_d = st.selectbox("Empresa", emp_f["nombre"], key="div_emp")
-    t_d = emp_f.loc[emp_f["nombre"] == nombre_d, "ticker"].iloc[0]
+    nombre_d = st.selectbox("Acción", emp_f["nemo"], key="div_emp")
+    t_d = emp_f.loc[emp_f["nemo"] == nombre_d, "ticker"].iloc[0]
 
     try:
         d = cargar_dividendos_yahoo(t_d)
@@ -291,7 +304,6 @@ with tab2:
         div = pd.read_csv("dividendos.csv")
         for c in ["fecha_corte", "fecha_pago"]:
             div[c] = pd.to_datetime(div[c], errors="coerce")
-        div = div.merge(empresas[["ticker", "nombre"]], on="ticker", how="left")
         div = div[div["ticker"].isin(emp_f["ticker"])]
         pendientes = div[(div["fecha_pago"] >= hoy) | (div["fecha_corte"] >= hoy)]
         pendientes = pendientes.sort_values("fecha_corte")
@@ -305,7 +317,7 @@ with tab2:
         )
     else:
         vista_p = pd.DataFrame({
-            "Empresa": pendientes["nombre"],
+            "Nemotécnico": pendientes["ticker"].str.replace(".SN", "", regex=False).str.upper(),
             "Tipo": pendientes["tipo"],
             "Monto por acción ($)": pendientes["monto_por_accion"],
             "Fecha de corte": pendientes["fecha_corte"].dt.date,
@@ -363,7 +375,7 @@ with tab3:
         prox = largo[largo["fecha"] >= hoy].copy()
         if ventanas[sel]:
             prox = prox[prox["fecha"] <= hoy + pd.Timedelta(days=ventanas[sel])]
-        prox = prox.sort_values(["fecha", "nombre"])
+        prox = prox.sort_values(["fecha", "ticker"])
 
         if prox.empty:
             st.info("No hay publicaciones en esa ventana de tiempo.")
@@ -371,8 +383,7 @@ with tab3:
             vista_c = pd.DataFrame({
                 "Fecha": prox["fecha"].dt.date,
                 "Faltan (días)": (prox["fecha"] - hoy).dt.days,
-                "Empresa": prox["nombre"],
-                "Ticker": prox["ticker"].str.replace(".SN", "", regex=False),
+                "Nemotécnico": prox["ticker"].str.replace(".SN", "", regex=False).str.upper(),
                 "Resultados": prox["resultados"],
             })
             st.dataframe(
@@ -380,6 +391,6 @@ with tab3:
                 column_config={"Fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY")},
             )
 
-        sin = base[base[list(PERIODOS)].isna().all(axis=1)]["nombre"].tolist()
+        sin = base[base[list(PERIODOS)].isna().all(axis=1)]["ticker"].str.replace(".SN", "", regex=False).str.upper().tolist()
         if sin:
             st.caption("Sin fechas en la CMF: " + ", ".join(sin))
