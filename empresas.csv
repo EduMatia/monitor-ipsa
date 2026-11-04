@@ -59,14 +59,14 @@ ALMENDRAL.SN,Almendral,Holding,Otras,BCS:ALMENDRAL,94270000-8
 PEHUENCHE.SN,Pehuenche,Energía,Otras,BCS:PEHUENCHE,96504980-0
 ENELDXCH.SN,Enel Distribución Chile,Energía,Otras,BCS:ENELDXCH,96800570-7
 ENELGXCH.SN,Enel Generación Chile,Energía,Otras,BCS:ENELGXCH,91081000-6
-LASCONDES.SN,Clínica Las Condes,Salud,Otras,BCS:LASCONDES,93930000-7
+LASCONDES.SN,Clínica Las Condes,Salud,Otras,BCS:LAS_CONDES,93930000-7
 INDISA.SN,Instituto de Diagnóstico,Salud,Otras,BCS:INDISA,92051000-0
 AAISA.SN,Administradora Americana de Inversiones,Holding,Otras,BCS:AAISA,77513781-9
 HABITAT.SN,AFP Habitat,Financiero,Otras,BCS:HABITAT,98000100-8
 CUPRUM.SN,AFP Cuprum,Financiero,Otras,BCS:CUPRUM,76240079-0
 PROVIDA.SN,AFP ProVida,Financiero,Otras,BCS:PROVIDA,76265736-8
 PLANVITAL.SN,AFP PlanVital,Financiero,Otras,BCS:PLANVITAL,98001200-K
-MULTIX.SN,Multiexport Foods,Alimentos,Otras,BCS:MULTIX,76672100-1
+MULTIX.SN,Multiexport Foods,Alimentos,Otras,BCS:MULTI_X,76672100-1
 SALMOCAM.SN,Salmones Camanchaca,Alimentos,Otras,BCS:SALMOCAM,76065596-1
 CAMANCHACA.SN,Camanchaca,Alimentos,Otras,BCS:CAMANCHACA,93711000-6
 BLUMAR.SN,Blumar,Alimentos,Otras,BCS:BLUMAR,80860400-0

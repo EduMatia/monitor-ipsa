@@ -428,3 +428,4 @@ with tab_g:
     </script>
     """
     components.html(html_g, height=660)
+    st.caption("Gráficos por [TradingView](https://es.tradingview.com/)")
