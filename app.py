@@ -12,8 +12,8 @@ st.set_page_config(page_title="Monitor IPSA / IGPA", layout="wide")
 
 st.title("Monitor de acciones chilenas")
 st.caption(
-    "Precios de Yahoo Finance (pueden venir con retraso) y fechas de la CMF. "
-    "Esto es informativo y no es una recomendación de inversión."
+    "Precio actual: Yahoo Finance (puede venir con retraso). Historial: cierres guardados por este dashboard. "
+    "Fechas de resultados: CMF. Esto es informativo y no es una recomendación de inversión."
 )
 
 URL_CMF = "https://www.cmfchile.cl/institucional/mercados/novedades_envio_fechas_eeff.php"
@@ -41,17 +41,40 @@ def cargar_empresas():
     return df
 
 
-@st.cache_data(ttl=900)
-def cargar_precios(tickers):
-    inicio = (pd.Timestamp.today() - pd.DateOffset(years=1, months=2)).strftime("%Y-%m-%d")
-    datos = yf.download(list(tickers), start=inicio, auto_adjust=False, progress=False)
-    cierre = datos["Close"]
-    ajustado = datos["Adj Close"]  # precio que incluye dividendos
-    volumen = datos["Volume"]
-    cierre.index = pd.to_datetime(cierre.index).tz_localize(None)
-    ajustado.index = pd.to_datetime(ajustado.index).tz_localize(None)
-    volumen.index = pd.to_datetime(volumen.index).tz_localize(None)
-    return cierre, ajustado, volumen
+@st.cache_data(ttl=300)
+def cargar_historial():
+    """Cierres diarios propios.
+    historial.csv: lo escribe el proceso automático (GitHub Actions).
+    precios_manual.csv: lo editas tú (por ejemplo, el cierre de fin de año). Si coinciden, manda lo manual."""
+    partes = []
+    for archivo, prioridad in [("historial.csv", 0), ("precios_manual.csv", 1)]:
+        try:
+            d = pd.read_csv(archivo)
+        except Exception:
+            continue
+        d["fecha"] = pd.to_datetime(d["fecha"], errors="coerce")
+        d["cierre"] = pd.to_numeric(d["cierre"], errors="coerce")
+        d = d.dropna(subset=["fecha", "ticker", "cierre"])
+        d["prioridad"] = prioridad
+        partes.append(d)
+    if not partes:
+        return pd.DataFrame()
+    h = pd.concat(partes).sort_values("prioridad")
+    h = h.drop_duplicates(["fecha", "ticker"], keep="last")
+    return h.pivot(index="fecha", columns="ticker", values="cierre").sort_index()
+
+
+@st.cache_data(ttl=300)
+def cargar_dividendos_csv():
+    cols = ["ticker", "tipo", "monto_por_accion", "fecha_corte", "fecha_pago", "fuente"]
+    try:
+        d = pd.read_csv("dividendos.csv")
+    except Exception:
+        return pd.DataFrame(columns=cols)
+    for c in ["fecha_corte", "fecha_pago"]:
+        d[c] = pd.to_datetime(d[c], errors="coerce")
+    d["monto_por_accion"] = pd.to_numeric(d["monto_por_accion"], errors="coerce")
+    return d
 
 
 @st.cache_data(ttl=21600)  # 6 horas
@@ -102,21 +125,22 @@ def cargar_fechas_cmf():
     raise ValueError("No encontré la tabla de fechas en la página de la CMF")
 
 
-def solo_con_transacciones(serie, vol):
-    """Quita los días sin transacciones (volumen 0), donde Yahoo repite el precio anterior."""
-    if vol is None:
-        return serie
-    con = serie[vol.reindex(serie.index).fillna(0) > 0]
-    return con if len(con) >= 2 else serie
-
-
-def retorno(serie, fecha_ref, ultimo=None):
-    """Cambio porcentual entre el cierre de fecha_ref y el último precio."""
+def valor_en(serie, fecha_ref, max_dias=6):
+    """Último cierre guardado en fecha_ref o antes, pero solo si no es más antiguo que max_dias."""
     previo = serie.loc[:fecha_ref]
     if previo.empty:
         return None
-    actual = serie.iloc[-1] if ultimo is None else ultimo
-    return (actual / previo.iloc[-1] - 1) * 100
+    if (fecha_ref - previo.index[-1]).days > max_dias:
+        return None
+    return previo.iloc[-1]
+
+
+def retorno(serie, fecha_ref, ultimo, max_dias=6):
+    """Cambio porcentual entre el cierre de fecha_ref y el precio actual."""
+    base = valor_en(serie, fecha_ref, max_dias)
+    if base is None or base <= 0:
+        return None
+    return (ultimo / base - 1) * 100
 
 
 # "hoy" según la hora de Chile
@@ -140,17 +164,20 @@ if emp_f.empty:
 emp_f = emp_f.assign(nemo=emp_f["ticker"].str.replace(".SN", "", regex=False).str.upper())
 
 # ---------- Precios y tabla de rendimientos ----------
-try:
-    with st.spinner("Descargando precios..."):
-        cierre, ajustado, volumen = cargar_precios(tuple(empresas["ticker"]))
-except Exception as e:
-    cierre, ajustado, volumen = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-    st.warning(f"No se pudieron descargar los precios de Yahoo: {e}")
+cierre = cargar_historial()
 
 try:
-    cotizaciones = cargar_cotizaciones(tuple(empresas["ticker"]))
+    with st.spinner("Consultando precios actuales..."):
+        cotizaciones = cargar_cotizaciones(tuple(empresas["ticker"]))
 except Exception:
     cotizaciones = {}
+
+div_csv = cargar_dividendos_csv()
+ini_anio = pd.Timestamp(year=hoy.year, month=1, day=1)
+div_ytd = (
+    div_csv[(div_csv["fecha_corte"] >= ini_anio) & (div_csv["fecha_corte"] <= hoy)]
+    .groupby("ticker")["monto_por_accion"].sum()
+)
 
 fechas = {
     "Var. semana": hoy - pd.Timedelta(days=7),
@@ -173,18 +200,14 @@ columnas_pct = [
 filas = []
 for _, e in empresas.iterrows():
     t = e["ticker"]
-    if t not in cierre.columns:
-        continue
-    vol = volumen[t] if t in volumen.columns else None
-    c = solo_con_transacciones(cierre[t].dropna(), vol)
-    a = solo_con_transacciones(ajustado[t].dropna(), vol)
-    if len(c) < 2:
-        continue
+    c = cierre[t].dropna() if t in cierre.columns else pd.Series(dtype=float)
     cot = cotizaciones.get(t)
     if cot:
         ultimo, cierre_prev = cot  # precio actual y cierre anterior según Yahoo
-    else:
+    elif len(c) >= 2:
         ultimo, cierre_prev = c.iloc[-1], c.iloc[-2]
+    else:
+        continue
     fila = {
         "Empresa": e["nombre"],
         "Nemotécnico": t.replace(".SN", "").upper(),
@@ -195,8 +218,13 @@ for _, e in empresas.iterrows():
         "Var. hoy": (ultimo / cierre_prev - 1) * 100,
     }
     for nombre, fecha in fechas.items():
-        fila[nombre] = retorno(c, fecha, ultimo)
-    fila["YTD (c/div.)"] = retorno(a, fechas["YTD (precio)"], ultimo)
+        fila[nombre] = retorno(c, fecha, ultimo, 10 if nombre == "YTD (precio)" else 6)
+    base_ytd = valor_en(c, fechas["YTD (precio)"], 10)
+    if base_ytd:
+        # rentabilidad total simple: precio actual + dividendos del año (por fecha de corte)
+        fila["YTD (c/div.)"] = ((ultimo + div_ytd.get(t, 0.0)) / base_ytd - 1) * 100
+    else:
+        fila["YTD (c/div.)"] = None
     filas.append(fila)
 
 tabla = pd.DataFrame(filas, columns=COLUMNAS)
@@ -214,10 +242,17 @@ with tab1:
     if tabla.empty:
         st.warning("No hay datos de precios para mostrar. Revisa los tickers en empresas.csv.")
     else:
-        mejor, peor = tabla.iloc[0], tabla.iloc[-1]
-        m1, m2 = st.columns(2)
-        m1.metric("Mejor del año (c/div.)", mejor["Nemotécnico"], pct_cl(mejor["YTD (c/div.)"]))
-        m2.metric("Peor del año (c/div.)", peor["Nemotécnico"], pct_cl(peor["YTD (c/div.)"]))
+        con_ytd = tabla.dropna(subset=["YTD (c/div.)"])
+        if con_ytd.empty:
+            st.info(
+                "Aún no hay cierres de fin de año cargados. Completa la columna 'cierre' "
+                "del archivo precios_manual.csv para ver el rendimiento del año."
+            )
+        else:
+            mejor, peor = con_ytd.iloc[0], con_ytd.iloc[-1]
+            m1, m2 = st.columns(2)
+            m1.metric("Mejor del año (c/div.)", mejor["Nemotécnico"], pct_cl(mejor["YTD (c/div.)"]))
+            m2.metric("Peor del año (c/div.)", peor["Nemotécnico"], pct_cl(peor["YTD (c/div.)"]))
 
         def color(valor):
             if pd.isna(valor):
@@ -232,15 +267,22 @@ with tab1:
         )
         st.dataframe(estilo, use_container_width=True, hide_index=True, height=520)
 
-        st.subheader("Rendimiento en el año (con dividendos)")
-        st.bar_chart(tabla.set_index("Nemotécnico")["YTD (c/div.)"])
+        st.caption(
+            "YTD (c/div.) suma los dividendos cargados en dividendos.csv (por fecha de corte), sin reinversión. "
+            "Los periodos sin cierres guardados suficientes aparecen como —."
+        )
+        if not con_ytd.empty:
+            st.subheader("Rendimiento en el año (con dividendos)")
+            st.bar_chart(con_ytd.set_index("Nemotécnico")["YTD (c/div.)"])
 
         with st.expander("Diagnóstico (datos crudos)"):
             tk = st.selectbox("Acción", emp_f["ticker"], key="diag_tk", format_func=lambda x: x.replace(".SN", ""))
             st.write("Cotización según Yahoo (precio actual, cierre anterior):", cotizaciones.get(tk))
-            if tk in cierre.columns:
-                st.write("Últimos días descargados (cierre y volumen):")
-                st.dataframe(pd.DataFrame({"Cierre": cierre[tk], "Volumen": volumen[tk]}).dropna(subset=["Cierre"]).tail(8))
+            if tk in cierre.columns and not cierre[tk].dropna().empty:
+                st.write("Últimos cierres guardados (historial propio):")
+                st.dataframe(cierre[tk].dropna().tail(8))
+            else:
+                st.write("Aún no hay cierres guardados para esta acción.")
 
 # ===== Pestaña 2: Dividendos =====
 with tab2:
@@ -260,8 +302,14 @@ with tab2:
         ult12 = d[d.index >= hoy - pd.DateOffset(years=1)].sum()
         m1, m2 = st.columns(2)
         m1.metric("Dividendos últimos 12 meses ($ por acción)", num_cl(ult12, 2))
-        if t_d in cierre.columns and not cierre[t_d].dropna().empty:
+        cot_d = cotizaciones.get(t_d)
+        if cot_d:
+            precio = cot_d[0]
+        elif t_d in cierre.columns and not cierre[t_d].dropna().empty:
             precio = cierre[t_d].dropna().iloc[-1]
+        else:
+            precio = None
+        if precio:
             m2.metric("Rentabilidad por dividendo (12 meses)", num_cl(ult12 / precio * 100, 2) + "%")
 
         recientes = d[d.index >= hoy - pd.DateOffset(years=3)].sort_index(ascending=False)

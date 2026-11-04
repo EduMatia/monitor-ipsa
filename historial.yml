@@ -1,0 +1,30 @@
+name: Guardar cierres diarios
+
+on:
+  schedule:
+    # Lunes a viernes, 22:30 UTC (19:30 o 18:30 en Chile, siempre después del cierre)
+    - cron: "30 22 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  guardar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar librerías
+        run: pip install yfinance pandas
+      - name: Guardar los cierres de hoy
+        run: python actualizar_historial.py
+      - name: Subir los cambios al repositorio
+        run: |
+          git config user.name "historial-bot"
+          git config user.email "historial-bot@users.noreply.github.com"
+          git add historial.csv
+          git diff --cached --quiet || git commit -m "Cierres del $(date -u +%F)"
+          git push
