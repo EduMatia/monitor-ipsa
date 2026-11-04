@@ -1,4 +1,5 @@
 import io
+import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 
@@ -205,7 +206,9 @@ tabla[["Precio"] + columnas_pct] = tabla[["Precio"] + columnas_pct].astype(float
 tabla = tabla.sort_values("YTD (c/div.)", ascending=False).reset_index(drop=True)
 
 # ---------- Pestañas ----------
-tab1, tab2, tab3 = st.tabs(["Rendimientos", "Dividendos", "Calendario de resultados"])
+tab1, tab_g, tab2, tab3, tab4 = st.tabs(
+    ["Rendimientos", "Gráficos", "Dividendos", "Calendario de resultados", "Rendimientos TradingView"]
+)
 
 # ===== Pestaña 1: Rendimientos =====
 with tab1:
@@ -232,29 +235,6 @@ with tab1:
 
         st.subheader("Rendimiento en el año (con dividendos)")
         st.bar_chart(tabla.set_index("Nemotécnico")["YTD (c/div.)"])
-
-        st.subheader("Gráfico de una acción")
-        nombre_sel = st.selectbox("Elige una acción", tabla["Nemotécnico"], key="graf_emp")
-        ticker_sel = tabla.loc[tabla["Nemotécnico"] == nombre_sel, "Ticker"].iloc[0]
-        simbolo_tv = empresas.loc[empresas["ticker"] == ticker_sel, "tv"].iloc[0]
-
-        html = f"""
-        <div id="grafico" style="height:520px;"></div>
-        <script src="https://s3.tradingview.com/tv.js"></script>
-        <script>
-        new TradingView.widget({{
-          "autosize": true,
-          "symbol": "{simbolo_tv}",
-          "interval": "D",
-          "timezone": "America/Santiago",
-          "theme": "light",
-          "style": "1",
-          "locale": "es",
-          "container_id": "grafico"
-        }});
-        </script>
-        """
-        components.html(html, height=540)
 
         with st.expander("Diagnóstico (datos crudos)"):
             tk = st.selectbox("Acción", emp_f["ticker"], key="diag_tk", format_func=lambda x: x.replace(".SN", ""))
@@ -394,3 +374,104 @@ with tab3:
         sin = base[base[list(PERIODOS)].isna().all(axis=1)]["ticker"].str.replace(".SN", "", regex=False).str.upper().tolist()
         if sin:
             st.caption("Sin fechas en la CMF: " + ", ".join(sin))
+
+# ===== Pestaña 4: Screener de TradingView (rendimientos por periodo) =====
+with tab4:
+    st.subheader("Rendimientos según TradingView")
+    st.caption(
+        "Tabla incrustada de TradingView con todas las acciones de la Bolsa de Santiago. "
+        "Los datos son de TradingView (con retraso), no de Yahoo. "
+        "Si no ves las columnas de rendimiento, cambia a la vista 'Performance' dentro de la tabla."
+    )
+    tv_html = """
+    <div class="tradingview-widget-container">
+      <div class="tradingview-widget-container__widget"></div>
+      <div class="tradingview-widget-copyright" style="font-family:sans-serif;font-size:12px;padding-top:6px;">
+        <a href="https://es.tradingview.com/" rel="noopener nofollow" target="_blank">Seguimiento de todos los mercados en TradingView</a>
+      </div>
+      <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-screener.js" async>
+      {
+        "width": "100%",
+        "height": 640,
+        "defaultColumn": "performance",
+        "defaultScreen": "general",
+        "market": "chile",
+        "showToolbar": true,
+        "colorTheme": "light",
+        "locale": "es"
+      }
+      </script>
+    </div>
+    """
+    components.html(tv_html, height=700, scrolling=True)
+
+# ===== Pestaña Gráficos =====
+with tab_g:
+    st.subheader("Gráfico de una acción")
+    c1, c2, c3 = st.columns([2, 2, 3])
+    sel_g = c1.selectbox("Acción", emp_f["nemo"], key="graf_emp")
+    tipo_g = c2.radio("Gráfico", ["Simple (escala logarítmica)", "Avanzado (indicadores)"], key="graf_tipo")
+    simbolo_tv = emp_f.loc[emp_f["nemo"] == sel_g, "tv"].iloc[0]
+
+    if tipo_g.startswith("Simple"):
+        estilo_g = c3.radio("Estilo", ["Velas", "Línea", "Área"], horizontal=True, key="graf_estilo")
+        tipo_serie = {"Velas": "candlesticks", "Línea": "line", "Área": "area"}[estilo_g]
+        config = {
+            "symbols": [[sel_g, simbolo_tv + "|12M"]],
+            "chartOnly": False,
+            "width": "100%",
+            "height": 560,
+            "locale": "es",
+            "colorTheme": "light",
+            "autosize": False,
+            "showVolume": True,
+            "showMA": False,
+            "hideDateRanges": False,
+            "hideMarketStatus": False,
+            "hideSymbolLogo": False,
+            "scalePosition": "right",
+            "scaleMode": "Logarithmic",
+            "fontFamily": "-apple-system, BlinkMacSystemFont, Trebuchet MS, Roboto, Ubuntu, sans-serif",
+            "fontSize": "10",
+            "noTimeScale": False,
+            "valuesTracking": "1",
+            "changeMode": "price-and-percent",
+            "chartType": tipo_serie,
+            "maLineColor": "#2962FF",
+            "maLineWidth": 1,
+            "maLength": 9,
+            "lineWidth": 2,
+            "lineType": 0,
+            "dateRanges": ["1m|30", "3m|60", "12m|1D", "60m|1W", "all|1M"],
+        }
+        html_g = f"""
+        <div class="tradingview-widget-container">
+          <div class="tradingview-widget-container__widget"></div>
+          <div class="tradingview-widget-copyright" style="font-family:sans-serif;font-size:12px;padding-top:6px;">
+            <a href="https://es.tradingview.com/" rel="noopener nofollow" target="_blank">Seguimiento de todos los mercados en TradingView</a>
+          </div>
+          <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-symbol-overview.js" async>
+          {json.dumps(config)}
+          </script>
+        </div>
+        """
+        components.html(html_g, height=640)
+    else:
+        st.caption("En este gráfico la escala logarítmica se activa con el botón 'log' abajo a la derecha del gráfico.")
+        html_g = f"""
+        <div id="grafico" style="height:520px;"></div>
+        <script src="https://s3.tradingview.com/tv.js"></script>
+        <script>
+        new TradingView.widget({{
+          "autosize": true,
+          "symbol": "{simbolo_tv}",
+          "interval": "D",
+          "timezone": "America/Santiago",
+          "theme": "light",
+          "style": "1",
+          "locale": "es",
+          "container_id": "grafico"
+        }});
+        </script>
+        """
+        components.html(html_g, height=540)
