@@ -86,6 +86,24 @@ def cargar_dividendos_yahoo(ticker):
     return d
 
 
+@st.cache_data(ttl=21600)  # 6 horas
+def cargar_dividendos_anio(tickers, desde):
+    """Suma de dividendos por acción desde la fecha 'desde' (AAAA-MM-DD), según Yahoo (fecha ex-dividendo)."""
+
+    def uno(t):
+        try:
+            d = yf.Ticker(t).dividends
+            if d is None or d.empty:
+                return t, 0.0
+            d.index = pd.to_datetime(d.index).tz_localize(None)
+            return t, float(d[d.index >= pd.Timestamp(desde)].sum())
+        except Exception:
+            return t, None
+
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        return dict(ex.map(uno, tickers))
+
+
 @st.cache_data(ttl=300)  # 5 minutos
 def cargar_cotizaciones(tickers):
     """Precio actual y cierre anterior, igual que los muestra Yahoo en su sitio."""
@@ -178,6 +196,11 @@ div_ytd = (
     div_csv[(div_csv["fecha_corte"] >= ini_anio) & (div_csv["fecha_corte"] <= hoy)]
     .groupby("ticker")["monto_por_accion"].sum()
 )
+try:
+    with st.spinner("Consultando dividendos del año..."):
+        div_yahoo = cargar_dividendos_anio(tuple(empresas["ticker"]), ini_anio.strftime("%Y-%m-%d"))
+except Exception:
+    div_yahoo = {}
 
 fechas = {
     "Var. semana": hoy - pd.Timedelta(days=7),
@@ -220,9 +243,12 @@ for _, e in empresas.iterrows():
     for nombre, fecha in fechas.items():
         fila[nombre] = retorno(c, fecha, ultimo, 10 if nombre == "YTD (precio)" else 6)
     base_ytd = valor_en(c, fechas["YTD (precio)"], 10)
-    if base_ytd:
-        # rentabilidad total simple: precio actual + dividendos del año (por fecha de corte)
-        fila["YTD (c/div.)"] = ((ultimo + div_ytd.get(t, 0.0)) / base_ytd - 1) * 100
+    d_anio = div_yahoo.get(t)
+    if t in div_ytd.index:  # lo cargado a mano en dividendos.csv tiene prioridad
+        d_anio = float(div_ytd[t])
+    if base_ytd and d_anio is not None:
+        # rentabilidad total simple: precio actual + dividendos del año, sin reinversión
+        fila["YTD (c/div.)"] = ((ultimo + d_anio) / base_ytd - 1) * 100
     else:
         fila["YTD (c/div.)"] = None
     filas.append(fila)
@@ -233,9 +259,13 @@ tabla[["Precio"] + columnas_pct] = tabla[["Precio"] + columnas_pct].astype(float
 tabla = tabla.sort_values("YTD (c/div.)", ascending=False).reset_index(drop=True)
 
 # ---------- Pestañas ----------
-tab1, tab_g, tab2, tab3 = st.tabs(
-    ["Rendimientos", "Gráficos", "Dividendos", "Calendario de resultados"]
-)
+es_admin = st.query_params.get("admin") == "importar"  # herramienta privada: agrega ?admin=importar al link
+nombres_tabs = ["Rendimientos", "Gráficos", "Dividendos", "Calendario de resultados"]
+if es_admin:
+    nombres_tabs.append("Importar (admin)")
+_tabs = st.tabs(nombres_tabs)
+tab1, tab_g, tab2, tab3 = _tabs[:4]
+tab_imp = _tabs[4] if es_admin else None
 
 # ===== Pestaña 1: Rendimientos =====
 with tab1:
@@ -268,8 +298,8 @@ with tab1:
         st.dataframe(estilo, use_container_width=True, hide_index=True, height=520)
 
         st.caption(
-            "YTD (c/div.) suma los dividendos cargados en dividendos.csv (por fecha de corte), sin reinversión. "
-            "Los periodos sin cierres guardados suficientes aparecen como —."
+            "YTD (c/div.) suma los dividendos del año según Yahoo (por fecha ex-dividendo), sin reinversión; "
+            "lo que cargues en dividendos.csv tiene prioridad. Los periodos sin cierres guardados suficientes aparecen como —."
         )
         if not con_ytd.empty:
             st.subheader("Rendimiento en el año (con dividendos)")
@@ -278,6 +308,7 @@ with tab1:
         with st.expander("Diagnóstico (datos crudos)"):
             tk = st.selectbox("Acción", emp_f["ticker"], key="diag_tk", format_func=lambda x: x.replace(".SN", ""))
             st.write("Cotización según Yahoo (precio actual, cierre anterior):", cotizaciones.get(tk))
+            st.write("Dividendos del año sumados ($ por acción):", div_yahoo.get(tk))
             if tk in cierre.columns and not cierre[tk].dropna().empty:
                 st.write("Últimos cierres guardados (historial propio):")
                 st.dataframe(cierre[tk].dropna().tail(8))
@@ -447,3 +478,43 @@ with tab_g:
     """
     components.html(html_g, height=660)
     st.caption("Gráficos por [TradingView](https://es.tradingview.com/)")
+
+# ===== Pestaña privada: importar históricos pegados =====
+if tab_imp is not None:
+    from importador import fusionar, parsear_pegado
+
+    with tab_imp:
+        st.subheader("Importar históricos pegados")
+        st.caption(
+            "Pega aquí las tablas de precios históricos copiadas desde la web. Cada acción empieza con una línea "
+            "#NEMOTECNICO (por ejemplo #AGUAS-A) y debajo la tabla pegada tal cual. "
+            "Del texto solo se guardan la fecha y el cierre; lo pegado no se almacena en ninguna parte."
+        )
+        texto = st.text_area("Tablas pegadas", height=320, key="pegado_hist")
+        if texto.strip():
+            nuevo, avisos = parsear_pegado(texto, set(empresas["ticker"]))
+            for a in avisos:
+                st.warning(a)
+            if nuevo.empty:
+                st.info("Aún no encontré filas con fecha y precio.")
+            else:
+                resumen = (
+                    nuevo.groupby("ticker")["fecha"]
+                    .agg(filas="count", desde="min", hasta="max")
+                    .reset_index()
+                )
+                resumen["ticker"] = resumen["ticker"].str.replace(".SN", "", regex=False)
+                resumen = resumen.rename(columns={"ticker": "Nemotécnico"})
+                st.dataframe(resumen, hide_index=True, use_container_width=True)
+                try:
+                    existente = pd.read_csv("precios_manual.csv", dtype={"fecha": str, "ticker": str})
+                except Exception:
+                    existente = None
+                final = fusionar(existente, nuevo)
+                st.download_button(
+                    "Descargar precios_manual.csv actualizado",
+                    final.to_csv(index=False).encode("utf-8"),
+                    file_name="precios_manual.csv",
+                    mime="text/csv",
+                )
+                st.caption("Sube ese archivo a GitHub reemplazando el actual (Add file, Upload files, Commit).")
