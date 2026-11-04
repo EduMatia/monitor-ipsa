@@ -1,5 +1,6 @@
 import io
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import requests
@@ -60,6 +61,25 @@ def cargar_dividendos_yahoo(ticker):
     return d
 
 
+@st.cache_data(ttl=300)  # 5 minutos
+def cargar_cotizaciones(tickers):
+    """Precio actual y cierre anterior, igual que los muestra Yahoo en su sitio."""
+
+    def uno(t):
+        try:
+            fi = yf.Ticker(t).fast_info
+            ultimo = float(fi["last_price"])
+            previo = float(fi["previous_close"])
+            if ultimo > 0 and previo > 0:
+                return t, (ultimo, previo)
+        except Exception:
+            pass
+        return t, None
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        return dict(ex.map(uno, tickers))
+
+
 def norm_rut(x):
     return re.sub(r"[^0-9Kk]", "", str(x)).upper()
 
@@ -80,12 +100,13 @@ def cargar_fechas_cmf():
     raise ValueError("No encontré la tabla de fechas en la página de la CMF")
 
 
-def retorno(serie, fecha_ref):
+def retorno(serie, fecha_ref, ultimo=None):
     """Cambio porcentual entre el cierre de fecha_ref y el último precio."""
     previo = serie.loc[:fecha_ref]
     if previo.empty:
         return None
-    return (serie.iloc[-1] / previo.iloc[-1] - 1) * 100
+    actual = serie.iloc[-1] if ultimo is None else ultimo
+    return (actual / previo.iloc[-1] - 1) * 100
 
 
 # "hoy" según la hora de Chile
@@ -115,6 +136,11 @@ except Exception as e:
     cierre, ajustado = pd.DataFrame(), pd.DataFrame()
     st.warning(f"No se pudieron descargar los precios de Yahoo: {e}")
 
+try:
+    cotizaciones = cargar_cotizaciones(tuple(empresas["ticker"]))
+except Exception:
+    cotizaciones = {}
+
 fechas = {
     "Var. semana": hoy - pd.Timedelta(days=7),
     "MTD": hoy.replace(day=1) - pd.Timedelta(days=1),
@@ -142,17 +168,22 @@ for _, e in empresas.iterrows():
     a = ajustado[t].dropna()
     if len(c) < 2:
         continue
+    cot = cotizaciones.get(t)
+    if cot:
+        ultimo, cierre_prev = cot  # precio actual y cierre anterior según Yahoo
+    else:
+        ultimo, cierre_prev = c.iloc[-1], c.iloc[-2]
     fila = {
         "Empresa": e["nombre"],
         "Ticker": t,
         "Sector": e["sector"],
         "Índice": e["indice"],
-        "Precio": c.iloc[-1],
-        "Var. hoy": (c.iloc[-1] / c.iloc[-2] - 1) * 100,
+        "Precio": ultimo,
+        "Var. hoy": (ultimo / cierre_prev - 1) * 100,
     }
     for nombre, fecha in fechas.items():
-        fila[nombre] = retorno(c, fecha)
-    fila["YTD (c/div.)"] = retorno(a, fechas["YTD (precio)"])
+        fila[nombre] = retorno(c, fecha, ultimo)
+    fila["YTD (c/div.)"] = retorno(a, fechas["YTD (precio)"], ultimo)
     filas.append(fila)
 
 tabla = pd.DataFrame(filas, columns=COLUMNAS)
@@ -211,6 +242,13 @@ with tab1:
         </script>
         """
         components.html(html, height=540)
+
+        with st.expander("Diagnóstico (datos crudos)"):
+            tk = st.selectbox("Acción", emp_f["ticker"], key="diag_tk")
+            st.write("Cotización según Yahoo (precio actual, cierre anterior):", cotizaciones.get(tk))
+            if tk in cierre.columns:
+                st.write("Últimos cierres diarios descargados:")
+                st.dataframe(cierre[tk].dropna().tail(6))
 
 # ===== Pestaña 2: Dividendos =====
 with tab2:
