@@ -1,3 +1,5 @@
 streamlit
 yfinance
 pandas>=2.1
+requests
+lxml
