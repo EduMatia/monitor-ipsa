@@ -113,21 +113,42 @@ def cargar_dividendos_anio(tickers, desde):
 
 @st.cache_data(ttl=300)  # 5 minutos
 def cargar_cotizaciones(tickers):
-    """Precio actual y cierre anterior, igual que los muestra Yahoo en su sitio."""
+    """Precio actual y cierre anterior, como los muestra Yahoo en su sitio.
+    Devuelve (cotizaciones, motivos): cotizaciones[ticker] = (precio, cierre_anterior o None) o None;
+    motivos[ticker] explica por qué no hubo cotización."""
 
     def uno(t):
+        motivos = []
+        tk = yf.Ticker(t)
+        # 1) cotización rápida
         try:
-            fi = yf.Ticker(t).fast_info
-            ultimo = float(fi["last_price"])
-            previo = float(fi["previous_close"])
-            if ultimo > 0 and previo > 0:
-                return t, (ultimo, previo)
-        except Exception:
-            pass
-        return t, None
+            fi = tk.fast_info
+            ultimo, previo = fi["last_price"], fi["previous_close"]
+            ultimo = float(ultimo) if ultimo is not None else None
+            previo = float(previo) if previo is not None else None
+            if ultimo and ultimo > 0:
+                return t, (ultimo, previo if previo and previo > 0 else None), None
+            motivos.append("fast_info sin precio")
+        except Exception as e:
+            motivos.append(f"fast_info: {type(e).__name__}")
+        # 2) ficha completa (lo mismo que muestra la web de Yahoo)
+        try:
+            info = tk.info
+            ultimo = info.get("regularMarketPrice") or info.get("currentPrice")
+            previo = info.get("regularMarketPreviousClose") or info.get("previousClose")
+            if ultimo and float(ultimo) > 0:
+                previo = float(previo) if previo and float(previo) > 0 else None
+                return t, (float(ultimo), previo), None
+            motivos.append("info sin precio")
+        except Exception as e:
+            motivos.append(f"info: {type(e).__name__}")
+        return t, None, "; ".join(motivos)
 
     with ThreadPoolExecutor(max_workers=6) as ex:
-        return dict(ex.map(uno, tickers))
+        resultados = list(ex.map(uno, tickers))
+    cotizaciones = {t: cot for t, cot, _ in resultados}
+    motivos = {t: m for t, _, m in resultados if m}
+    return cotizaciones, motivos
 
 
 def norm_rut(x):
@@ -193,9 +214,10 @@ cierre = cargar_historial()
 
 try:
     with st.spinner("Consultando precios actuales..."):
-        cotizaciones = cargar_cotizaciones(tuple(empresas["ticker"]))
-except Exception:
-    cotizaciones = {}
+        cotizaciones, motivos_cot = cargar_cotizaciones(tuple(empresas["ticker"]))
+except Exception as e:
+    cotizaciones, motivos_cot = {}, {}
+    st.warning(f"No se pudieron consultar los precios actuales: {type(e).__name__}")
 
 div_csv = cargar_dividendos_csv()
 ini_anio = pd.Timestamp(year=hoy.year, month=1, day=1)
@@ -249,8 +271,9 @@ for _, e in empresas.iterrows():
         filas.append(fila)  # la acción aparece igual, sin datos
         continue
     fila["Precio"] = ultimo
-    fila["Var. hoy ($)"] = ultimo - cierre_prev
-    fila["Var. hoy"] = (ultimo / cierre_prev - 1) * 100
+    if cierre_prev:
+        fila["Var. hoy ($)"] = ultimo - cierre_prev
+        fila["Var. hoy"] = (ultimo / cierre_prev - 1) * 100
     for nombre, fecha in fechas.items():
         fila[nombre] = retorno(c, fecha, ultimo, 10 if nombre == "YTD (precio)" else 6)
     base_ytd = valor_en(c, fechas["YTD (precio)"], 10)
@@ -328,6 +351,8 @@ with tab1:
         with st.expander("Diagnóstico (datos crudos)"):
             tk = st.selectbox("Acción", emp_f["ticker"], key="diag_tk", format_func=lambda x: x.replace(".SN", ""))
             st.write("Cotización según Yahoo (precio actual, cierre anterior):", cotizaciones.get(tk))
+            if not cotizaciones.get(tk):
+                st.write("Motivo de la falta de cotización:", motivos_cot.get(tk, "sin información"))
             st.write("Dividendos del año sumados ($ por acción):", div_yahoo.get(tk))
             for archivo in ["historial.csv", "precios_manual.csv"]:
                 try:
