@@ -27,6 +27,13 @@ def num_cl(v, dec=2):
     return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def peso_signo_cl(v):
+    if pd.isna(v):
+        return "—"
+    signo = "+" if v > 0 else "-" if v < 0 else ""
+    return signo + "$" + num_cl(abs(v), 2)
+
+
 def pct_cl(v):
     if pd.isna(v):
         return "—"
@@ -203,22 +210,23 @@ except Exception:
     div_yahoo = {}
 
 fechas = {
-    "Var. semana": hoy - pd.Timedelta(days=7),
+    "WTD": hoy - pd.Timedelta(days=hoy.weekday() + 1),  # domingo anterior -> cierre del último día hábil de la semana pasada
+    "1 semana": hoy - pd.Timedelta(days=7),
     "MTD": hoy.replace(day=1) - pd.Timedelta(days=1),
     "1 mes": hoy - pd.DateOffset(months=1),
-    "3 meses": hoy - pd.DateOffset(months=3),
     "YTD (precio)": pd.Timestamp(year=hoy.year - 1, month=12, day=31),
     "1 año": hoy - pd.DateOffset(years=1),
 }
 
 COLUMNAS = [
-    "Empresa", "Nemotécnico", "Ticker", "Sector", "Índice", "Precio", "Var. hoy", "Var. semana",
-    "MTD", "1 mes", "3 meses", "YTD (precio)", "YTD (c/div.)", "1 año",
+    "Empresa", "Nemotécnico", "Ticker", "Sector", "Precio", "Var. hoy ($)", "Var. hoy", "WTD",
+    "1 semana", "MTD", "1 mes", "YTD (precio)", "YTD (c/div.)", "1 año",
 ]
 columnas_pct = [
-    "Var. hoy", "Var. semana", "MTD", "1 mes", "3 meses",
+    "Var. hoy", "WTD", "1 semana", "MTD", "1 mes",
     "YTD (precio)", "YTD (c/div.)", "1 año",
 ]
+columnas_num = ["Precio", "Var. hoy ($)"] + columnas_pct
 
 filas = []
 for _, e in empresas.iterrows():
@@ -227,19 +235,22 @@ for _, e in empresas.iterrows():
     cot = cotizaciones.get(t)
     if cot:
         ultimo, cierre_prev = cot  # precio actual y cierre anterior según Yahoo
-    elif len(c) >= 2:
-        ultimo, cierre_prev = c.iloc[-1], c.iloc[-2]
+    elif len(c) >= 2 and (hoy - c.index[-1]).days <= 5:
+        ultimo, cierre_prev = c.iloc[-1], c.iloc[-2]  # sin cotización de Yahoo: último cierre guardado si es reciente
     else:
-        continue
+        ultimo = None
     fila = {
         "Empresa": e["nombre"],
         "Nemotécnico": t.replace(".SN", "").upper(),
         "Ticker": t,
         "Sector": e["sector"],
-        "Índice": e["indice"],
-        "Precio": ultimo,
-        "Var. hoy": (ultimo / cierre_prev - 1) * 100,
     }
+    if ultimo is None:
+        filas.append(fila)  # la acción aparece igual, sin datos
+        continue
+    fila["Precio"] = ultimo
+    fila["Var. hoy ($)"] = ultimo - cierre_prev
+    fila["Var. hoy"] = (ultimo / cierre_prev - 1) * 100
     for nombre, fecha in fechas.items():
         fila[nombre] = retorno(c, fecha, ultimo, 10 if nombre == "YTD (precio)" else 6)
     base_ytd = valor_en(c, fechas["YTD (precio)"], 10)
@@ -255,7 +266,7 @@ for _, e in empresas.iterrows():
 
 tabla = pd.DataFrame(filas, columns=COLUMNAS)
 tabla = tabla[tabla["Ticker"].isin(emp_f["ticker"])]
-tabla[["Precio"] + columnas_pct] = tabla[["Precio"] + columnas_pct].astype(float).round(2)
+tabla[columnas_num] = tabla[columnas_num].astype(float).round(2)
 tabla = tabla.sort_values("YTD (c/div.)", ascending=False).reset_index(drop=True)
 
 # ---------- Pestañas ----------
@@ -292,12 +303,21 @@ with tab1:
         vista = tabla.drop(columns=["Empresa", "Ticker"])  # el nombre y el .SN son internos, no se muestran
         estilo = (
             vista.style
-            .map(color, subset=columnas_pct)
-            .format({**{c: pct_cl for c in columnas_pct}, "Precio": lambda v: "$" + num_cl(v, 2)})
+            .map(color, subset=["Var. hoy ($)"] + columnas_pct)
+            .format({
+                **{c: pct_cl for c in columnas_pct},
+                "Var. hoy ($)": peso_signo_cl,
+                "Precio": lambda v: "—" if pd.isna(v) else "$" + num_cl(v, 2),
+            })
         )
         st.dataframe(estilo, use_container_width=True, hide_index=True, height=520)
 
+        sin_datos = tabla.loc[tabla["Precio"].isna(), "Nemotécnico"].tolist()
+        if sin_datos:
+            st.caption("Sin cotización disponible (revisa su ticker en empresas.csv): " + ", ".join(sin_datos))
+
         st.caption(
+            "WTD es lo que lleva la semana (desde el último cierre de la semana pasada); 1 semana compara con hace 7 días. "
             "YTD (c/div.) suma los dividendos del año según Yahoo (por fecha ex-dividendo), sin reinversión; "
             "lo que cargues en dividendos.csv tiene prioridad. Los periodos sin cierres guardados suficientes aparecen como —."
         )
@@ -309,9 +329,19 @@ with tab1:
             tk = st.selectbox("Acción", emp_f["ticker"], key="diag_tk", format_func=lambda x: x.replace(".SN", ""))
             st.write("Cotización según Yahoo (precio actual, cierre anterior):", cotizaciones.get(tk))
             st.write("Dividendos del año sumados ($ por acción):", div_yahoo.get(tk))
+            for archivo in ["historial.csv", "precios_manual.csv"]:
+                try:
+                    n_filas = len(pd.read_csv(archivo).dropna(subset=["cierre"]))
+                    st.write(f"{archivo}: {n_filas} filas con precio")
+                except Exception:
+                    st.write(f"{archivo}: no se pudo leer (¿está en la raíz del repositorio con ese nombre exacto?)")
             if tk in cierre.columns and not cierre[tk].dropna().empty:
-                st.write("Últimos cierres guardados (historial propio):")
-                st.dataframe(cierre[tk].dropna().tail(8))
+                serie_tk = cierre[tk].dropna()
+                st.write(
+                    f"Cierres guardados de esta acción: {len(serie_tk)} "
+                    f"(del {serie_tk.index.min():%d-%m-%Y} al {serie_tk.index.max():%d-%m-%Y})"
+                )
+                st.dataframe(serie_tk.tail(8))
             else:
                 st.write("Aún no hay cierres guardados para esta acción.")
 

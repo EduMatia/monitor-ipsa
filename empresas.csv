@@ -59,14 +59,14 @@ ALMENDRAL.SN,Almendral,Holding,Otras,BCS:ALMENDRAL,94270000-8
 PEHUENCHE.SN,Pehuenche,Energía,Otras,BCS:PEHUENCHE,96504980-0
 ENELDXCH.SN,Enel Distribución Chile,Energía,Otras,BCS:ENELDXCH,96800570-7
 ENELGXCH.SN,Enel Generación Chile,Energía,Otras,BCS:ENELGXCH,91081000-6
-LASCONDES.SN,Clínica Las Condes,Salud,Otras,BCS:LAS_CONDES,93930000-7
+LAS-CONDES.SN,Clínica Las Condes,Salud,Otras,BCS:LAS_CONDES,93930000-7
 INDISA.SN,Instituto de Diagnóstico,Salud,Otras,BCS:INDISA,92051000-0
 AAISA.SN,Administradora Americana de Inversiones,Holding,Otras,BCS:AAISA,77513781-9
 HABITAT.SN,AFP Habitat,Financiero,Otras,BCS:HABITAT,98000100-8
 CUPRUM.SN,AFP Cuprum,Financiero,Otras,BCS:CUPRUM,76240079-0
 PROVIDA.SN,AFP ProVida,Financiero,Otras,BCS:PROVIDA,76265736-8
 PLANVITAL.SN,AFP PlanVital,Financiero,Otras,BCS:PLANVITAL,98001200-K
-MULTIX.SN,Multiexport Foods,Alimentos,Otras,BCS:MULTI_X,76672100-1
+MULTI-X.SN,Multiexport Foods,Alimentos,Otras,BCS:MULTI_X,76672100-1
 SALMOCAM.SN,Salmones Camanchaca,Alimentos,Otras,BCS:SALMOCAM,76065596-1
 CAMANCHACA.SN,Camanchaca,Alimentos,Otras,BCS:CAMANCHACA,93711000-6
 BLUMAR.SN,Blumar,Alimentos,Otras,BCS:BLUMAR,80860400-0
@@ -89,3 +89,35 @@ NAVIERA.SN,Empresas Navieras,Transporte,Otras,BCS:NAVIERA,95134000-6
 VOLCAN.SN,El Volcán,Construcción,Otras,BCS:VOLCAN,90209000-2
 VSPT.SN,Viña San Pedro Tarapacá,Bebidas,Otras,BCS:VSPT,91041000-8
 GASCO.SN,Empresas Gasco,Energía,Otras,BCS:GASCO,90310000-1
+AZUL-AZUL.SN,Azul Azul,Consumo,Otras,BCS:AZUL_AZUL,
+ANDINA-A.SN,Embotelladora Andina A,Bebidas,Otras,BCS:ANDINA_A,91144000-8
+BANVIDA.SN,Banvida,Holding · Seguros,Otras,BCS:BANVIDA,
+CIC.SN,Compañías CIC,Consumo,Otras,BCS:CIC,
+CINTAC.SN,Cintac,Industrial,Otras,BCS:CINTAC,
+COLO-COLO.SN,Blanco y Negro (Colo-Colo),Consumo,Otras,BCS:COLO_COLO,
+EDELPA.SN,Edelpa,Otros,Otras,BCS:EDELPA,
+EMBONOR-A.SN,Coca-Cola Embonor A,Bebidas,Otras,BCS:EMBONOR_A,93281000-K
+SQM-A.SN,SQM-A,Minería,Otras,BCS:SQM_A,93007000-9
+PASUR.SN,Pasur,Forestal,Otras,BCS:PASUR,
+POLPAICO.SN,Cemento Polpaico,Construcción,Otras,BCS:POLPAICO,
+VENTANAS.SN,Ventanas,Otros,Otras,BCS:VENTANAS,
+FROWARD.SN,Portuaria Cabo Froward,Transporte,Otras,BCS:FROWARD,
+CRUZADOS.SN,Cruzados SADP,Consumo,Otras,BCS:CRUZADOS,
+EMILIANA.SN,Viñedos Emiliana,Bebidas,Otras,BCS:EMILIANA,
+BOLSASTGO.SN,Bolsa de Comercio de Santiago,Financiero,Otras,BCS:BOLSASTGO,
+CGE.SN,CGE,Energía,Otras,BCS:CGE,
+CGET.SN,CGE Transmisión,Energía,Otras,BCS:CGET,
+CLUBUNION.SN,Unión Inmobiliaria (Club Unión),Consumo,Otras,BCS:CLUBUNION,
+CONSOGRAL.SN,Chilena Consolidada,Holding · Seguros,Otras,BCS:CONSOGRAL,
+COPEVAL.SN,Copeval,Alimentos,Otras,BCS:COPEVAL,
+CTC.SN,Telefónica Chile,Telecomunicaciones,Otras,BCS:CTC,
+DUNCANFOX.SN,Duncan Fox,Alimentos,Otras,BCS:DUNCANFOX,
+EDELMAG.SN,Edelmag,Energía,Otras,BCS:EDELMAG,
+ENLASA.SN,Energía Latina,Energía,Otras,BCS:ENLASA,
+FEPASA.SN,Fepasa,Transporte,Otras,BCS:FEPASA,
+INVERNOVA.SN,Invernova,Financiero,Otras,BCS:INVERNOVA,
+MARBELLACC.SN,Marbella Country Club,Consumo,Otras,BCS:MARBELLACC,
+NAVARINO.SN,Navarino,Financiero,Otras,BCS:NAVARINO,
+NIBSA.SN,García Llorente Leiva,Industrial,Otras,BCS:NIBSA,
+NUTRAVALOR.SN,Inversiones Nutravalor,Alimentos,Otras,BCS:NUTRAVALOR,
+POTASIOS-A.SN,Potasios Investments A,Holding · Minería,Otras,BCS:POTASIOS_A,
