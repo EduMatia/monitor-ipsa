@@ -30,16 +30,33 @@ ultimo_guardado = (
     if not historial.empty else {}
 )
 
+def precio_actual(ticker):
+    """Precio actual: primero la consulta rápida y, si viene vacía, la ficha completa de Yahoo."""
+    tk = yf.Ticker(ticker)
+    try:
+        v = tk.fast_info["last_price"]
+        v = float(v) if v is not None else None
+        if v and v > 0:
+            return v
+    except Exception:
+        pass
+    try:
+        info = tk.info
+        v = info.get("regularMarketPrice") or info.get("currentPrice")
+        if v and float(v) > 0:
+            return float(v)
+    except Exception:
+        pass
+    return None
+
+
 nuevas = []
 for ticker in empresas["ticker"]:
     if ticker in ya_guardadas:
         continue
-    try:
-        precio = float(yf.Ticker(ticker).fast_info["last_price"])
-    except Exception as e:
-        print(f"Sin precio para {ticker}: {e}")
-        continue
-    if not precio > 0:
+    precio = precio_actual(ticker)
+    if precio is None:
+        print(f"Sin precio para {ticker}")
         continue
     previo = ultimo_guardado.get(ticker)
     if previo and abs(precio / previo - 1) > MAX_SALTO:

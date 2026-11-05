@@ -257,6 +257,10 @@ for _, e in empresas.iterrows():
     cot = cotizaciones.get(t)
     if cot:
         ultimo, cierre_prev = cot  # precio actual y cierre anterior según Yahoo
+        if not cierre_prev and len(c):
+            anteriores = c[c.index < hoy]
+            if not anteriores.empty and (hoy - anteriores.index[-1]).days <= 10:
+                cierre_prev = anteriores.iloc[-1]  # Yahoo no lo entrega: último cierre guardado
     elif len(c) >= 2 and (hoy - c.index[-1]).days <= 5:
         ultimo, cierre_prev = c.iloc[-1], c.iloc[-2]  # sin cotización de Yahoo: último cierre guardado si es reciente
     else:
@@ -348,27 +352,28 @@ with tab1:
             st.subheader("Rendimiento en el año (con dividendos)")
             st.bar_chart(con_ytd.set_index("Nemotécnico")["YTD (c/div.)"])
 
-        with st.expander("Diagnóstico (datos crudos)"):
-            tk = st.selectbox("Acción", emp_f["ticker"], key="diag_tk", format_func=lambda x: x.replace(".SN", ""))
-            st.write("Cotización según Yahoo (precio actual, cierre anterior):", cotizaciones.get(tk))
-            if not cotizaciones.get(tk):
-                st.write("Motivo de la falta de cotización:", motivos_cot.get(tk, "sin información"))
-            st.write("Dividendos del año sumados ($ por acción):", div_yahoo.get(tk))
-            for archivo in ["historial.csv", "precios_manual.csv"]:
-                try:
-                    n_filas = len(pd.read_csv(archivo).dropna(subset=["cierre"]))
-                    st.write(f"{archivo}: {n_filas} filas con precio")
-                except Exception:
-                    st.write(f"{archivo}: no se pudo leer (¿está en la raíz del repositorio con ese nombre exacto?)")
-            if tk in cierre.columns and not cierre[tk].dropna().empty:
-                serie_tk = cierre[tk].dropna()
-                st.write(
-                    f"Cierres guardados de esta acción: {len(serie_tk)} "
-                    f"(del {serie_tk.index.min():%d-%m-%Y} al {serie_tk.index.max():%d-%m-%Y})"
-                )
-                st.dataframe(serie_tk.tail(8))
-            else:
-                st.write("Aún no hay cierres guardados para esta acción.")
+        if es_admin:  # solo visible con ?admin=importar al final del link
+            with st.expander("Diagnóstico (datos crudos)"):
+                tk = st.selectbox("Acción", emp_f["ticker"], key="diag_tk", format_func=lambda x: x.replace(".SN", ""))
+                st.write("Cotización según Yahoo (precio actual, cierre anterior):", cotizaciones.get(tk))
+                if not cotizaciones.get(tk):
+                    st.write("Motivo de la falta de cotización:", motivos_cot.get(tk, "sin información"))
+                st.write("Dividendos del año sumados ($ por acción):", div_yahoo.get(tk))
+                for archivo in ["historial.csv", "precios_manual.csv"]:
+                    try:
+                        n_filas = len(pd.read_csv(archivo).dropna(subset=["cierre"]))
+                        st.write(f"{archivo}: {n_filas} filas con precio")
+                    except Exception:
+                        st.write(f"{archivo}: no se pudo leer (¿está en la raíz del repositorio con ese nombre exacto?)")
+                if tk in cierre.columns and not cierre[tk].dropna().empty:
+                    serie_tk = cierre[tk].dropna()
+                    st.write(
+                        f"Cierres guardados de esta acción: {len(serie_tk)} "
+                        f"(del {serie_tk.index.min():%d-%m-%Y} al {serie_tk.index.max():%d-%m-%Y})"
+                    )
+                    st.dataframe(serie_tk.tail(8))
+                else:
+                    st.write("Aún no hay cierres guardados para esta acción.")
 
 # ===== Pestaña 2: Dividendos =====
 with tab2:
