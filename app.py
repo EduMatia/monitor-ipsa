@@ -11,10 +11,7 @@ import yfinance as yf
 st.set_page_config(page_title="Monitor IPSA / IGPA", layout="wide")
 
 st.title("Monitor de acciones chilenas")
-st.caption(
-    "Precio actual: Yahoo Finance (puede venir con retraso). Historial: cierres guardados por este dashboard. "
-    "Fechas de resultados: CMF. Esto es informativo y no es una recomendación de inversión."
-)
+st.caption("Información de carácter referencial; no constituye asesoría ni recomendación de inversión.")
 
 URL_CMF = "https://www.cmfchile.cl/institucional/mercados/novedades_envio_fechas_eeff.php"
 
@@ -155,7 +152,7 @@ def norm_rut(x):
     return re.sub(r"[^0-9Kk]", "", str(x)).upper()
 
 
-@st.cache_data(ttl=86400)  # 1 día
+@st.cache_data(ttl=3600)  # 1 hora
 def cargar_fechas_cmf():
     r = requests.get(URL_CMF, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
     r.raise_for_status()
@@ -373,7 +370,7 @@ with tab1:
 
 # ===== Pestaña 2: Dividendos =====
 with tab2:
-    st.subheader("Dividendos pagados (según Yahoo Finance)")
+    st.subheader("Dividendos pagados")
     nombre_d = st.selectbox("Acción", emp_f["nemo"], key="div_emp")
     t_d = emp_f.loc[emp_f["nemo"] == nombre_d, "ticker"].iloc[0]
 
