@@ -31,6 +31,16 @@ def peso_signo_cl(v):
     return signo + "$" + num_cl(abs(v), 2)
 
 
+def texto_monto(moneda, v):
+    if pd.isna(v):
+        return "—"
+    if moneda == "USD":
+        return "US$ " + num_cl(v, 8)
+    if moneda == "EUR":
+        return "€ " + num_cl(v, 8)
+    return "$ " + num_cl(v, 2)
+
+
 def pct_cl(v):
     if pd.isna(v):
         return "—"
@@ -70,14 +80,21 @@ def cargar_historial():
 
 @st.cache_data(ttl=300)
 def cargar_dividendos_csv():
-    cols = ["ticker", "tipo", "monto_por_accion", "fecha_corte", "fecha_pago", "fuente"]
+    cols = ["ticker", "n_dividendo", "tipo", "moneda", "monto_original", "fecha_corte", "fecha_pago",
+            "tipo_cambio", "fecha_tc", "monto_por_accion", "fuente"]
     try:
         d = pd.read_csv("dividendos.csv")
     except Exception:
         return pd.DataFrame(columns=cols)
+    for c in cols:
+        if c not in d:
+            d[c] = None
+    d["moneda"] = d["moneda"].fillna("CLP")
     for c in ["fecha_corte", "fecha_pago"]:
         d[c] = pd.to_datetime(d[c], errors="coerce")
-    d["monto_por_accion"] = pd.to_numeric(d["monto_por_accion"], errors="coerce")
+    for c in ["monto_por_accion", "monto_original", "tipo_cambio"]:
+        d[c] = pd.to_numeric(d[c], errors="coerce")
+    d["monto_original"] = d["monto_original"].fillna(d["monto_por_accion"])
     return d
 
 
@@ -219,7 +236,7 @@ except Exception as e:
 div_csv = cargar_dividendos_csv()
 ini_anio = pd.Timestamp(year=hoy.year, month=1, day=1)
 div_ytd = (
-    div_csv[(div_csv["fecha_corte"] >= ini_anio) & (div_csv["fecha_corte"] <= hoy)]
+    div_csv[(div_csv["fecha_corte"] >= ini_anio) & (div_csv["fecha_corte"] < hoy)]
     .groupby("ticker")["monto_por_accion"].sum()
 )
 try:
@@ -374,71 +391,93 @@ with tab2:
     nombre_d = st.selectbox("Acción", emp_f["nemo"], key="div_emp")
     t_d = emp_f.loc[emp_f["nemo"] == nombre_d, "ticker"].iloc[0]
 
-    try:
-        d = cargar_dividendos_yahoo(t_d)
-    except Exception as e:
-        d = pd.Series(dtype=float)
-        st.warning(f"No se pudieron leer los dividendos: {e}")
-
-    if d.empty:
-        st.info("Yahoo no tiene dividendos registrados para esta acción.")
+    cot_d = cotizaciones.get(t_d)
+    if cot_d:
+        precio = cot_d[0]
+    elif t_d in cierre.columns and not cierre[t_d].dropna().empty:
+        precio = cierre[t_d].dropna().iloc[-1]
     else:
-        ult12 = d[d.index >= hoy - pd.DateOffset(years=1)].sum()
+        precio = None
+
+    div_t = div_csv[div_csv["ticker"] == t_d]
+    if not div_t.empty:
+        # dividendos cargados desde la Bolsa de Santiago, ya convertidos a pesos
+        ult12 = div_t[
+            (div_t["fecha_corte"] >= hoy - pd.DateOffset(years=1)) & (div_t["fecha_corte"] < hoy)
+        ]["monto_por_accion"].sum()
         m1, m2 = st.columns(2)
         m1.metric("Dividendos últimos 12 meses ($ por acción)", num_cl(ult12, 2))
-        cot_d = cotizaciones.get(t_d)
-        if cot_d:
-            precio = cot_d[0]
-        elif t_d in cierre.columns and not cierre[t_d].dropna().empty:
-            precio = cierre[t_d].dropna().iloc[-1]
-        else:
-            precio = None
         if precio:
             m2.metric("Rentabilidad por dividendo (12 meses)", num_cl(ult12 / precio * 100, 2) + "%")
-
-        recientes = d[d.index >= hoy - pd.DateOffset(years=3)].sort_index(ascending=False)
+        pagados = div_t[
+            (div_t["fecha_pago"] <= hoy) & (div_t["fecha_pago"] >= hoy - pd.DateOffset(years=3))
+        ].sort_values(["fecha_pago", "n_dividendo"], ascending=False)
         vista_d = pd.DataFrame({
-            "Fecha": recientes.index.date,
-            "Dividendo por acción ($)": recientes.values.round(2),
+            "Fecha límite": pagados["fecha_corte"].dt.date,
+            "Fecha de pago": pagados["fecha_pago"].dt.date,
+            "Tipo": pagados["tipo"],
+            "Monto": [texto_monto(m, v) for m, v in zip(pagados["moneda"], pagados["monto_original"])],
+            "Tipo de cambio": pagados["tipo_cambio"].where(pagados["moneda"] != "CLP"),
+            "$ por acción": pagados["monto_por_accion"],
         })
         st.dataframe(
             vista_d, hide_index=True, use_container_width=True,
             column_config={
-                "Fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY"),
-                "Dividendo por acción ($)": st.column_config.NumberColumn(format="%.2f"),
+                "Fecha límite": st.column_config.DateColumn(format="DD/MM/YYYY"),
+                "Fecha de pago": st.column_config.DateColumn(format="DD/MM/YYYY"),
+                "Tipo de cambio": st.column_config.NumberColumn(format="%.2f"),
+                "$ por acción": st.column_config.NumberColumn(format="%.2f"),
             },
         )
-        st.caption("Los datos de Yahoo para Chile pueden estar incompletos. Verifica con los hechos esenciales de la empresa.")
+    else:
+        try:
+            d = cargar_dividendos_yahoo(t_d)
+        except Exception as e:
+            d = pd.Series(dtype=float)
+            st.warning(f"No se pudieron leer los dividendos: {e}")
+
+        if d.empty:
+            st.info("No hay dividendos registrados para esta acción.")
+        else:
+            ult12 = d[d.index >= hoy - pd.DateOffset(years=1)].sum()
+            m1, m2 = st.columns(2)
+            m1.metric("Dividendos últimos 12 meses ($ por acción)", num_cl(ult12, 2))
+            if precio:
+                m2.metric("Rentabilidad por dividendo (12 meses)", num_cl(ult12 / precio * 100, 2) + "%")
+            recientes = d[d.index >= hoy - pd.DateOffset(years=3)].sort_index(ascending=False)
+            vista_y = pd.DataFrame({
+                "Fecha": recientes.index.date,
+                "Dividendo por acción ($)": recientes.values.round(2),
+            })
+            st.dataframe(
+                vista_y, hide_index=True, use_container_width=True,
+                column_config={
+                    "Fecha": st.column_config.DateColumn("Fecha", format="DD/MM/YYYY"),
+                    "Dividendo por acción ($)": st.column_config.NumberColumn(format="%.2f"),
+                },
+            )
+            st.caption("Los datos de Yahoo para Chile pueden estar incompletos o ignorar dividendos en dólares o euros.")
 
     st.subheader("Por repartir")
-    try:
-        div = pd.read_csv("dividendos.csv")
-        for c in ["fecha_corte", "fecha_pago"]:
-            div[c] = pd.to_datetime(div[c], errors="coerce")
-        div = div[div["ticker"].isin(emp_f["ticker"])]
-        pendientes = div[(div["fecha_pago"] >= hoy) | (div["fecha_corte"] >= hoy)]
-        pendientes = pendientes.sort_values("fecha_corte")
-    except Exception:
-        pendientes = pd.DataFrame()
-
+    pendientes = div_csv[
+        div_csv["ticker"].isin(emp_f["ticker"]) & ((div_csv["fecha_pago"] > hoy) | div_csv["fecha_pago"].isna())
+    ].sort_values("fecha_corte")
     if pendientes.empty:
-        st.info(
-            "No hay dividendos por repartir cargados. Se agregan a mano en el archivo "
-            "dividendos.csv, a partir de los hechos esenciales de cada empresa."
-        )
+        st.info("No hay dividendos por repartir cargados.")
     else:
         vista_p = pd.DataFrame({
             "Nemotécnico": pendientes["ticker"].str.replace(".SN", "", regex=False).str.upper(),
             "Tipo": pendientes["tipo"],
-            "Monto por acción ($)": pendientes["monto_por_accion"],
-            "Fecha de corte": pendientes["fecha_corte"].dt.date,
+            "Monto": [texto_monto(m, v) for m, v in zip(pendientes["moneda"], pendientes["monto_original"])],
+            "$ por acción": pendientes["monto_por_accion"],
+            "Fecha límite": pendientes["fecha_corte"].dt.date,
             "Fecha de pago": pendientes["fecha_pago"].dt.date,
-            "Fuente": pendientes["fuente"],
         })
         st.dataframe(
             vista_p, hide_index=True, use_container_width=True,
             column_config={
-                "Fecha de corte": st.column_config.DateColumn(format="DD/MM/YYYY"),
+                "$ por acción": st.column_config.NumberColumn(format="%.2f"),
+                "Fecha límite": st.column_config.DateColumn(format="DD/MM/YYYY"),
                 "Fecha de pago": st.column_config.DateColumn(format="DD/MM/YYYY"),
             },
         )
@@ -534,7 +573,12 @@ with tab_g:
 
 # ===== Pestaña privada: importar históricos pegados =====
 if tab_imp is not None:
+    from dividendos import completar, fusionar_dividendos, parsear_dividendos, tipo_cambio_mindicador
     from importador import fusionar, parsear_pegado
+
+    @st.cache_data(ttl=86400)
+    def tc_cacheado(moneda, fecha_iso):
+        return tipo_cambio_mindicador(moneda, pd.Timestamp(fecha_iso).date())
 
     with tab_imp:
         st.subheader("Importar históricos pegados")
@@ -568,6 +612,53 @@ if tab_imp is not None:
                     "Descargar precios_manual.csv actualizado",
                     final.to_csv(index=False).encode("utf-8"),
                     file_name="precios_manual.csv",
+                    mime="text/csv",
+                )
+                st.caption("Sube ese archivo a GitHub reemplazando el actual (Add file, Upload files, Commit).")
+
+        st.divider()
+        st.subheader("Importar dividendos")
+        st.caption(
+            "Pega la tabla de dividendos de la Bolsa de Santiago bajo una línea #NEMOTECNICO. Los montos en US$ o euros "
+            "se convierten a pesos con el dólar observado y el euro del Banco Central (vía mindicador.cl)."
+        )
+        opciones_tc = {"Fecha de pago": "pago", "5.º día hábil antes del pago": "pago_5", "Fecha límite": "limite"}
+        etiqueta_tc = st.radio("Tipo de cambio de la…", list(opciones_tc), horizontal=True, key="base_tc")
+        texto_div = st.text_area("Dividendos pegados", height=240, key="pegado_div")
+        if texto_div.strip():
+            nuevos_div, avisos_div = parsear_dividendos(texto_div, set(empresas["ticker"]))
+            for a in avisos_div:
+                st.warning(a)
+            if nuevos_div.empty:
+                st.info("Aún no encontré dividendos en el texto.")
+            else:
+                completos = completar(
+                    nuevos_div, opciones_tc[etiqueta_tc], hoy,
+                    lambda moneda, fecha: tc_cacheado(moneda, fecha.isoformat()),
+                )
+                st.dataframe(
+                    pd.DataFrame({
+                        "Nemotécnico": completos["ticker"].str.replace(".SN", "", regex=False),
+                        "Tipo": completos["tipo"],
+                        "Monto": [texto_monto(m, v) for m, v in zip(completos["moneda"], completos["monto_original"])],
+                        "Fecha límite": completos["fecha_corte"],
+                        "Fecha de pago": completos["fecha_pago"],
+                        "Tipo de cambio": completos["tipo_cambio"].where(completos["moneda"] != "CLP"),
+                        "Fecha del T.C.": completos["fecha_tc"],
+                        "$ por acción": completos["monto_por_accion"],
+                        "Estado": completos["estado"],
+                    }),
+                    hide_index=True, use_container_width=True,
+                )
+                try:
+                    existente_div = pd.read_csv("dividendos.csv")
+                except Exception:
+                    existente_div = None
+                final_div = fusionar_dividendos(existente_div, completos)
+                st.download_button(
+                    "Descargar dividendos.csv actualizado",
+                    final_div.to_csv(index=False).encode("utf-8"),
+                    file_name="dividendos.csv",
                     mime="text/csv",
                 )
                 st.caption("Sube ese archivo a GitHub reemplazando el actual (Add file, Upload files, Commit).")

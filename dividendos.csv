@@ -1,1 +1,1 @@
-ticker,tipo,monto_por_accion,fecha_corte,fecha_pago,fuente
+ticker,n_dividendo,tipo,moneda,monto_original,fecha_corte,fecha_pago,tipo_cambio,fecha_tc,monto_por_accion,fuente
