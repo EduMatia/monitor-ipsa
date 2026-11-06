@@ -1,1 +1,6 @@
 ticker,n_dividendo,tipo,moneda,monto_original,fecha_corte,fecha_pago,tipo_cambio,fecha_tc,monto_por_accion,fuente
+VAPORES.SN,336,Definitivo,USD,0.0012456662671,2026-05-14,2026-05-20,899.91,2026-05-13,1.120988,Bolsa de Santiago
+VAPORES.SN,337,Adicional,USD,0.0029065546231,2026-05-14,2026-05-20,899.91,2026-05-13,2.615638,Bolsa de Santiago
+VAPORES.SN,338,Eventual,USD,0.0014986111371,2026-05-14,2026-05-20,899.91,2026-05-13,1.348615,Bolsa de Santiago
+VAPORES.SN,339,Eventual,USD,0.001890105885,2026-05-14,2026-05-20,899.91,2026-05-13,1.700925,Bolsa de Santiago
+VAPORES.SN,340,Eventual,EUR,0.001621204223,2026-05-29,2026-06-04,1040.21,2026-05-28,1.686393,Bolsa de Santiago
