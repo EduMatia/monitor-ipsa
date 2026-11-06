@@ -327,7 +327,8 @@ with tab1:
                 return ""
             return "color: #1a7f4b" if valor > 0 else "color: #c0392b" if valor < 0 else ""
 
-        vista = tabla.drop(columns=["Empresa", "Ticker"])  # el nombre y el .SN son internos, no se muestran
+        # el nemotécnico va como índice: queda fijo a la izquierda al desplazar la tabla (útil en el celular)
+        vista = tabla.drop(columns=["Empresa", "Ticker"]).set_index("Nemotécnico")
         estilo = (
             vista.style
             .map(color, subset=["Var. hoy ($)"] + columnas_pct)
@@ -337,17 +338,12 @@ with tab1:
                 "Precio": lambda v: "—" if pd.isna(v) else "$" + num_cl(v, 2),
             })
         )
-        st.dataframe(estilo, use_container_width=True, hide_index=True, height=520)
+        st.dataframe(estilo, use_container_width=True, hide_index=False, height=520)
 
         sin_datos = tabla.loc[tabla["Precio"].isna(), "Nemotécnico"].tolist()
         if sin_datos:
             st.caption("Sin cotización disponible (revisa su ticker en empresas.csv): " + ", ".join(sin_datos))
 
-        st.caption(
-            "WTD es lo que lleva la semana (desde el último cierre de la semana pasada); 1 semana compara con hace 7 días. "
-            "YTD (c/div.) suma los dividendos del año según Yahoo (por fecha ex-dividendo), sin reinversión; "
-            "lo que cargues en dividendos.csv tiene prioridad. Los periodos sin cierres guardados suficientes aparecen como —."
-        )
         if not con_ytd.empty:
             st.subheader("Rendimiento en el año (con dividendos)")
             st.bar_chart(con_ytd.set_index("Nemotécnico")["YTD (c/div.)"])
