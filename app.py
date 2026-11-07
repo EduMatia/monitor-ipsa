@@ -336,53 +336,77 @@ tab_imp = _tabs[4] if es_admin else None
 
 # ===== Pestaña 1: Rendimientos =====
 with tab1:
-    if not indices.empty:
-        st.subheader("Principales índices de Chile")
-        filas_ind = []
-        for _, r in indices.iterrows():
-            ti = r["ticker"]
-            ci = cierre[ti].dropna() if ti in cierre.columns else pd.Series(dtype=float)
-            cot_i = cotizaciones.get(ti)
-            if cot_i:
-                valor_i = cot_i[0]
-            elif len(ci) and (hoy - ci.index[-1]).days <= 7:
-                valor_i = ci.iloc[-1]  # sin cotización de Yahoo: último cierre guardado si es reciente
+    con_ytd = tabla.dropna(subset=["YTD (c/div.)"])
+
+    # --- fila superior: tabla de índices | mejor del año | peor del año ---
+    css_indices = (
+        "<style>"
+        ".idx-titulo{font-weight:600;margin-bottom:.4rem}"
+        "table.idx{width:100%;border-collapse:collapse;font-size:.95rem}"
+        "table.idx th{font-weight:500;opacity:.65;font-size:.78rem;text-align:right;padding:0 .4rem .3rem}"
+        "table.idx td{padding:.35rem .4rem;text-align:right;white-space:nowrap;border-top:1px solid rgba(128,128,128,.25)}"
+        "table.idx th:first-child,table.idx td:first-child{text-align:left}"
+        "table.idx td.nom{font-weight:600}"
+        "table.idx td.pos{color:#1a7f4b;font-weight:500}"
+        "table.idx td.neg{color:#c0392b;font-weight:500}"
+        "</style>"
+    )
+
+    def celda_pct(v):
+        if pd.isna(v):
+            return "<td>—</td>"
+        clase = "pos" if v > 0 else "neg" if v < 0 else ""
+        return f'<td class="{clase}">{pct_cl(v)}</td>'
+
+    filas_html = ""
+    for _, r in indices.iterrows():
+        ti = r["ticker"]
+        ci = cierre[ti].dropna() if ti in cierre.columns else pd.Series(dtype=float)
+        cot_i = cotizaciones.get(ti)
+        if cot_i:
+            valor_i = cot_i[0]
+        elif len(ci) and (hoy - ci.index[-1]).days <= 7:
+            valor_i = ci.iloc[-1]  # sin cotización de Yahoo: último cierre guardado si es reciente
+        else:
+            valor_i = None
+        sem_i = anual_i = None
+        if valor_i is not None:
+            sem_i = retorno(ci, fechas["WTD"], valor_i, 6)
+            anual_i = retorno(ci, fechas["YTD (precio)"], valor_i, 10)
+        valor_txt = "—" if valor_i is None else num_cl(valor_i, 2)
+        filas_html += f'<tr><td class="nom">{r["nombre"]}</td><td>{valor_txt}</td>{celda_pct(sem_i)}{celda_pct(anual_i)}</tr>'
+    html_indices = (
+        css_indices
+        + '<div class="idx-titulo">Principales índices de Chile</div>'
+        + '<table class="idx"><thead><tr><th></th><th>Valor</th><th>Var. semanal</th><th>Var. anual</th></tr></thead>'
+        + f"<tbody>{filas_html}</tbody></table>"
+    )
+
+    c_idx, c_mej, c_peor = st.columns([2.4, 1, 1])
+    with c_idx:
+        with st.container(border=True):
+            if indices.empty:
+                st.caption("Sin índices configurados.")
             else:
-                valor_i = None
-            fila_i = {"Índice": r["nombre"], "Valor": valor_i, "Variación semanal": None, "Variación anual": None}
-            if valor_i is not None:
-                fila_i["Variación semanal"] = retorno(ci, fechas["WTD"], valor_i, 6)
-                fila_i["Variación anual"] = retorno(ci, fechas["YTD (precio)"], valor_i, 10)
-            filas_ind.append(fila_i)
-        tabla_ind = pd.DataFrame(
-            filas_ind, columns=["Índice", "Valor", "Variación semanal", "Variación anual"]
-        ).set_index("Índice").astype(float)
-        estilo_ind = (
-            tabla_ind.style
-            .map(color_signo, subset=["Variación semanal", "Variación anual"])
-            .format({
-                "Valor": lambda v: "—" if pd.isna(v) else num_cl(v, 2),
-                "Variación semanal": pct_cl,
-                "Variación anual": pct_cl,
-            })
-        )
-        st.dataframe(estilo_ind, use_container_width=True, hide_index=False, height=110)
+                st.markdown(html_indices, unsafe_allow_html=True)
+    with c_mej:
+        with st.container(border=True):
+            if con_ytd.empty:
+                st.metric("Mejor del año (c/div.)", "—")
+            else:
+                mejor = con_ytd.iloc[0]
+                st.metric("Mejor del año (c/div.)", mejor["Nemotécnico"], pct_cl(mejor["YTD (c/div.)"]))
+    with c_peor:
+        with st.container(border=True):
+            if con_ytd.empty:
+                st.metric("Peor del año (c/div.)", "—")
+            else:
+                peor = con_ytd.iloc[-1]
+                st.metric("Peor del año (c/div.)", peor["Nemotécnico"], pct_cl(peor["YTD (c/div.)"]))
 
     if tabla.empty:
         st.warning("No hay datos de precios para mostrar. Revisa los tickers en empresas.csv.")
     else:
-        con_ytd = tabla.dropna(subset=["YTD (c/div.)"])
-        if con_ytd.empty:
-            st.info(
-                "Aún no hay cierres de fin de año cargados. Completa la columna 'cierre' "
-                "del archivo precios_manual.csv para ver el rendimiento del año."
-            )
-        else:
-            mejor, peor = con_ytd.iloc[0], con_ytd.iloc[-1]
-            m1, m2 = st.columns(2)
-            m1.metric("Mejor del año (c/div.)", mejor["Nemotécnico"], pct_cl(mejor["YTD (c/div.)"]))
-            m2.metric("Peor del año (c/div.)", peor["Nemotécnico"], pct_cl(peor["YTD (c/div.)"]))
-
         def color(valor):
             if pd.isna(valor):
                 return ""
