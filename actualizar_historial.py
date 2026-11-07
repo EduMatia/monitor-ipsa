@@ -18,6 +18,8 @@ if hoy.weekday() >= 5:
     sys.exit(0)
 
 empresas = pd.read_csv("empresas.csv")
+if os.path.exists("indices.csv"):  # los índices (IPSA, IGPA) se guardan igual que las acciones
+    empresas = pd.concat([empresas[["ticker"]], pd.read_csv("indices.csv")[["ticker"]]], ignore_index=True)
 if os.path.exists(ARCHIVO):
     historial = pd.read_csv(ARCHIVO)
 else:

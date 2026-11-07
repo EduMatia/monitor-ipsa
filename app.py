@@ -61,7 +61,7 @@ def cargar_historial():
     historial.csv: lo escribe el proceso automático (GitHub Actions).
     precios_manual.csv: lo editas tú (por ejemplo, el cierre de fin de año). Si coinciden, manda lo manual."""
     partes = []
-    for archivo, prioridad in [("historial.csv", 0), ("precios_manual.csv", 1)]:
+    for archivo, prioridad in [("historial.csv", 0), ("precios_manual.csv", 1), ("indices_manual.csv", 1)]:
         try:
             d = pd.read_csv(archivo)
         except Exception:
@@ -76,6 +76,20 @@ def cargar_historial():
     h = pd.concat(partes).sort_values("prioridad")
     h = h.drop_duplicates(["fecha", "ticker"], keep="last")
     return h.pivot(index="fecha", columns="ticker", values="cierre").sort_index()
+
+
+@st.cache_data(ttl=300)
+def cargar_indices():
+    try:
+        return pd.read_csv("indices.csv")
+    except Exception:
+        return pd.DataFrame(columns=["ticker", "nombre"])
+
+
+def color_signo(valor):
+    if pd.isna(valor):
+        return ""
+    return "color: #1a7f4b" if valor > 0 else "color: #c0392b" if valor < 0 else ""
 
 
 @st.cache_data(ttl=300)
@@ -225,10 +239,11 @@ emp_f = emp_f.assign(nemo=emp_f["ticker"].str.replace(".SN", "", regex=False).st
 
 # ---------- Precios y tabla de rendimientos ----------
 cierre = cargar_historial()
+indices = cargar_indices()
 
 try:
     with st.spinner("Consultando precios actuales..."):
-        cotizaciones, motivos_cot = cargar_cotizaciones(tuple(empresas["ticker"]))
+        cotizaciones, motivos_cot = cargar_cotizaciones(tuple(empresas["ticker"]) + tuple(indices["ticker"]))
 except Exception as e:
     cotizaciones, motivos_cot = {}, {}
     st.warning(f"No se pudieron consultar los precios actuales: {type(e).__name__}")
@@ -321,6 +336,38 @@ tab_imp = _tabs[4] if es_admin else None
 
 # ===== Pestaña 1: Rendimientos =====
 with tab1:
+    if not indices.empty:
+        st.subheader("Principales índices de Chile")
+        filas_ind = []
+        for _, r in indices.iterrows():
+            ti = r["ticker"]
+            ci = cierre[ti].dropna() if ti in cierre.columns else pd.Series(dtype=float)
+            cot_i = cotizaciones.get(ti)
+            if cot_i:
+                valor_i = cot_i[0]
+            elif len(ci) and (hoy - ci.index[-1]).days <= 7:
+                valor_i = ci.iloc[-1]  # sin cotización de Yahoo: último cierre guardado si es reciente
+            else:
+                valor_i = None
+            fila_i = {"Índice": r["nombre"], "Valor": valor_i, "Variación semanal": None, "Variación anual": None}
+            if valor_i is not None:
+                fila_i["Variación semanal"] = retorno(ci, fechas["WTD"], valor_i, 6)
+                fila_i["Variación anual"] = retorno(ci, fechas["YTD (precio)"], valor_i, 10)
+            filas_ind.append(fila_i)
+        tabla_ind = pd.DataFrame(
+            filas_ind, columns=["Índice", "Valor", "Variación semanal", "Variación anual"]
+        ).set_index("Índice").astype(float)
+        estilo_ind = (
+            tabla_ind.style
+            .map(color_signo, subset=["Variación semanal", "Variación anual"])
+            .format({
+                "Valor": lambda v: "—" if pd.isna(v) else num_cl(v, 2),
+                "Variación semanal": pct_cl,
+                "Variación anual": pct_cl,
+            })
+        )
+        st.dataframe(estilo_ind, use_container_width=True, hide_index=False, height=110)
+
     if tabla.empty:
         st.warning("No hay datos de precios para mostrar. Revisa los tickers en empresas.csv.")
     else:
