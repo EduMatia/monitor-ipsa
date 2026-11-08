@@ -475,11 +475,15 @@ with tab1:
                 "Precio": lambda v: "—" if pd.isna(v) else "$" + num_cl(v, 2),
             })
         )
+        try:  # línea verde si el gráfico sube y roja si baja (en versiones antiguas de Streamlit no existe 'color')
+            col_linea = st.column_config.LineChartColumn("30 días", width="small", color="auto")
+        except TypeError:
+            col_linea = st.column_config.LineChartColumn("30 días", width="small")
         st.dataframe(
             estilo, use_container_width=True, hide_index=False, height=520,
             column_config={
                 "Logo": st.column_config.ImageColumn(" ", width="small"),
-                "30 días": st.column_config.LineChartColumn("30 días", width="small"),
+                "30 días": col_linea,
             },
         )
 
