@@ -249,7 +249,10 @@ def retorno(serie, fecha_ref, ultimo, max_dias=6):
 
 
 # "hoy" según la hora de Chile
-hoy = pd.Timestamp.now(tz="America/Santiago").tz_localize(None).normalize()
+ahora = pd.Timestamp.now(tz="America/Santiago").tz_localize(None)
+hoy = ahora.normalize()
+# fin de semana, o lunes antes de abrir el mercado: aún no hay una rueda "de hoy"
+sin_rueda_hoy = hoy.weekday() >= 5 or (hoy.weekday() == 0 and ahora.hour < 10)
 
 empresas = cargar_empresas()
 
@@ -325,6 +328,15 @@ for _, e in empresas.iterrows():
         ultimo, cierre_prev = c.iloc[-1], c.iloc[-2]  # sin cotización de Yahoo: último cierre guardado si es reciente
     else:
         ultimo = None
+    if ultimo is not None and sin_rueda_hoy and len(c) and (hoy - c.index[-1]).days <= 5 \
+            and (cierre_prev is None or abs(ultimo - cierre_prev) < 1e-6):
+        # Yahoo entrega el cierre del viernes como "cierre anterior" y la variación sale 0:
+        # se muestra la variación de la última rueda con nuestros cierres guardados
+        if abs(ultimo - c.iloc[-1]) < 1e-6:
+            if len(c) >= 2:
+                cierre_prev = c.iloc[-2]  # el cierre del viernes ya está guardado: se compara con el día anterior
+        else:
+            cierre_prev = c.iloc[-1]  # el viernes aún no estaba guardado: se compara con el último cierre guardado
     fila = {
         "Empresa": e["nombre"],
         "Nemotécnico": t.replace(".SN", "").upper(),
