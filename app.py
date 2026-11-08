@@ -255,6 +255,9 @@ ahora = pd.Timestamp.now(tz="America/Santiago").tz_localize(None)
 hoy = ahora.normalize()
 # fin de semana, o lunes antes de abrir el mercado: aún no hay una rueda "de hoy"
 sin_rueda_hoy = hoy.weekday() >= 5 or (hoy.weekday() == 0 and ahora.hour < 10)
+ultima_rueda = hoy - pd.Timedelta(days=1)  # último día hábil anterior a hoy (en fin de semana, el viernes)
+while ultima_rueda.weekday() >= 5:
+    ultima_rueda -= pd.Timedelta(days=1)
 
 empresas = cargar_empresas()
 
@@ -330,15 +333,13 @@ for _, e in empresas.iterrows():
         ultimo, cierre_prev = c.iloc[-1], c.iloc[-2]  # sin cotización de Yahoo: último cierre guardado si es reciente
     else:
         ultimo = None
-    if ultimo is not None and sin_rueda_hoy and len(c) and (hoy - c.index[-1]).days <= 5 \
-            and (cierre_prev is None or abs(ultimo - cierre_prev) < 1e-6):
-        # Yahoo entrega el cierre del viernes como "cierre anterior" y la variación sale 0:
-        # se muestra la variación de la última rueda con nuestros cierres guardados
-        if abs(ultimo - c.iloc[-1]) < 1e-6:
-            if len(c) >= 2:
-                cierre_prev = c.iloc[-2]  # el cierre del viernes ya está guardado: se compara con el día anterior
-        else:
-            cierre_prev = c.iloc[-1]  # el viernes aún no estaba guardado: se compara con el último cierre guardado
+    if sin_rueda_hoy and len(c) >= 2 and c.index[-1] >= ultima_rueda:
+        # mercado cerrado y ya tenemos el cierre de la última rueda: se usa ese y el anterior.
+        # (La cotización de Yahoo en fin de semana puede venir atrasada, por ejemplo con el cierre del jueves.)
+        ultimo, cierre_prev = c.iloc[-1], c.iloc[-2]
+    elif ultimo is not None and sin_rueda_hoy and len(c) and (hoy - c.index[-1]).days <= 5 \
+            and (cierre_prev is None or abs(ultimo - cierre_prev) < 1e-6) and abs(ultimo - c.iloc[-1]) >= 1e-6:
+        cierre_prev = c.iloc[-1]  # aún no estaba guardado el cierre de la última rueda: se compara con el último guardado
     fila = {
         "Empresa": e["nombre"],
         "Nemotécnico": t.replace(".SN", "").upper(),
@@ -351,7 +352,7 @@ for _, e in empresas.iterrows():
     fila["Precio"] = ultimo
     ultimos_30 = c[c.index >= hoy - pd.Timedelta(days=30)]
     puntos = [round(float(x), 2) for x in ultimos_30.tolist()]
-    if ultimos_30.empty or ultimos_30.index[-1] < hoy:
+    if ultimos_30.empty or (ultimos_30.index[-1] < hoy and abs(float(ultimos_30.iloc[-1]) - float(ultimo)) > 1e-9):
         puntos.append(round(float(ultimo), 2))  # el precio actual cierra la línea
     fila["30 días"] = puntos if len(puntos) >= 2 else None
     if len(puntos) >= 2 and puntos[0] > 0:  # cambio entre el primer y el último punto del gráfico (decide el color)
@@ -420,7 +421,9 @@ with tab1:
         ti = r["ticker"]
         ci = cierre[ti].dropna() if ti in cierre.columns else pd.Series(dtype=float, index=pd.DatetimeIndex([]))
         cot_i = cotizaciones.get(ti)
-        if cot_i:
+        if sin_rueda_hoy and len(ci) and ci.index[-1] >= ultima_rueda:
+            valor_i = ci.iloc[-1]  # mercado cerrado: cierre guardado de la última rueda
+        elif cot_i:
             valor_i = cot_i[0]
         elif len(ci) and (hoy - ci.index[-1]).days <= 7:
             valor_i = ci.iloc[-1]  # sin cotización de Yahoo: último cierre guardado si es reciente
