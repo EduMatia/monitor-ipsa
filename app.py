@@ -90,9 +90,11 @@ def cargar_empresas():
 def cargar_historial():
     """Cierres diarios propios.
     historial.csv: lo escribe el proceso automático (GitHub Actions).
-    precios_manual.csv: lo editas tú (por ejemplo, el cierre de fin de año). Si coinciden, manda lo manual."""
+    precios_manual.csv: lo pegas o editas tú (por ejemplo, el cierre de fin de año).
+    Si un mismo día está en los dos, manda el del proceso automático: se guarda después del cierre,
+    mientras que lo pegado a mano puede haberse copiado con el mercado abierto."""
     partes = []
-    for archivo, prioridad in [("historial.csv", 0), ("precios_manual.csv", 1), ("indices_manual.csv", 1)]:
+    for archivo, prioridad in [("historial.csv", 1), ("precios_manual.csv", 0), ("indices_manual.csv", 0)]:
         try:
             d = pd.read_csv(archivo)
         except Exception:
@@ -533,9 +535,33 @@ with tab1:
                         f"Cierres guardados de esta acción: {len(serie_tk)} "
                         f"(del {serie_tk.index.min():%d-%m-%Y} al {serie_tk.index.max():%d-%m-%Y})"
                     )
-                    st.dataframe(serie_tk.tail(8))
                 else:
                     st.write("Aún no hay cierres guardados para esta acción.")
+
+                def leer_cierres(archivo):
+                    try:
+                        d = pd.read_csv(archivo)
+                        d["fecha"] = pd.to_datetime(d["fecha"], errors="coerce")
+                        d["cierre"] = pd.to_numeric(d["cierre"], errors="coerce")
+                        return d.dropna(subset=["fecha", "ticker", "cierre"])
+                    except Exception:
+                        return pd.DataFrame(columns=["fecha", "ticker", "cierre"])
+
+                bot_df, man_df = leer_cierres("historial.csv"), leer_cierres("precios_manual.csv")
+                origen = pd.DataFrame({
+                    "historial.csv (bot)": bot_df[bot_df["ticker"] == tk].set_index("fecha")["cierre"],
+                    "precios_manual.csv": man_df[man_df["ticker"] == tk].set_index("fecha")["cierre"],
+                })
+                origen["Usado por la app"] = cierre[tk] if tk in cierre.columns else None
+                st.write("Últimos cierres de esta acción, según cada archivo:")
+                st.dataframe(origen.sort_index().tail(10))
+
+                cruce = bot_df.merge(man_df, on=["fecha", "ticker"], suffixes=("_bot", "_manual"))
+                cruce["dif %"] = ((cruce["cierre_bot"] / cruce["cierre_manual"] - 1) * 100).round(2)
+                cruce = cruce[cruce["dif %"].abs() > 1].sort_values("fecha", ascending=False)
+                st.write(f"Días con cierres que difieren más de 1% entre el bot y lo pegado a mano: {len(cruce)}")
+                if len(cruce):
+                    st.dataframe(cruce.head(20), hide_index=True)
 
 # ===== Pestaña 2: Dividendos =====
 with tab2:
@@ -741,7 +767,11 @@ if tab_imp is not None:
         )
         texto = st.text_area("Tablas pegadas", height=320, key="pegado_hist")
         if texto.strip():
-            nuevo, avisos = parsear_pegado(texto, set(empresas["ticker"]))
+            mercado_abierto = hoy.weekday() < 5 and ahora.hour < 18
+            nuevo, avisos = parsear_pegado(
+                texto, set(empresas["ticker"]),
+                ignorar_fecha=hoy.strftime("%Y-%m-%d") if mercado_abierto else None,
+            )
             for a in avisos:
                 st.warning(a)
             if nuevo.empty:
