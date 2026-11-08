@@ -310,13 +310,13 @@ fechas = {
 
 COLUMNAS = [
     "Empresa", "Nemotécnico", "Ticker", "Logo", "Precio", "Var. hoy ($)", "Var. hoy", "30 días", "WTD",
-    "1 semana", "MTD", "1 mes", "YTD (precio)", "YTD (c/div.)", "1 año", "Sector", "Var. 30 días",
+    "1 semana", "MTD", "1 mes", "YTD (precio)", "YTD (c/div.)", "1 año", "Sector",
 ]
 columnas_pct = [
     "Var. hoy", "WTD", "1 semana", "MTD", "1 mes",
     "YTD (precio)", "YTD (c/div.)", "1 año",
 ]
-columnas_num = ["Precio", "Var. hoy ($)", "Var. 30 días"] + columnas_pct
+columnas_num = ["Precio", "Var. hoy ($)"] + columnas_pct
 
 filas = []
 for _, e in empresas.iterrows():
@@ -355,8 +355,6 @@ for _, e in empresas.iterrows():
     if ultimos_30.empty or (ultimos_30.index[-1] < hoy and abs(float(ultimos_30.iloc[-1]) - float(ultimo)) > 1e-9):
         puntos.append(round(float(ultimo), 2))  # el precio actual cierra la línea
     fila["30 días"] = puntos if len(puntos) >= 2 else None
-    if len(puntos) >= 2 and puntos[0] > 0:  # cambio entre el primer y el último punto del gráfico (decide el color)
-        fila["Var. 30 días"] = (puntos[-1] / puntos[0] - 1) * 100
     if cierre_prev:
         fila["Var. hoy ($)"] = ultimo - cierre_prev
         fila["Var. hoy"] = (ultimo / cierre_prev - 1) * 100
@@ -472,23 +470,12 @@ with tab1:
                 return ""
             return "color: #1a7f4b" if valor > 0 else "color: #c0392b" if valor < 0 else ""
 
-        ordenables = ["YTD (c/div.)", "YTD (precio)", "Var. hoy", "WTD", "1 semana", "MTD", "1 mes", "30 días", "1 año",
-                      "Var. hoy ($)", "Precio", "Sector", "Nemotécnico"]
-        c_ord, c_dir, _ = st.columns([2, 2, 3])
-        col_orden = c_ord.selectbox("Ordenar por", ordenables, key="orden_col")
-        sentido = c_dir.radio("Orden", ["Mayor a menor", "Menor a mayor"], horizontal=True, key="orden_dir")
-        col_sort = "Var. 30 días" if col_orden == "30 días" else col_orden  # el gráfico se ordena por su cambio
-        tabla_ord = tabla.sort_values(
-            col_sort, ascending=(sentido == "Menor a mayor"), na_position="last", kind="stable"
-        ).reset_index(drop=True)
-
         # el nemotécnico va como índice: queda fijo a la izquierda al desplazar la tabla (útil en el celular)
-        vista = tabla_ord.drop(columns=["Empresa", "Ticker", "Var. 30 días"]).set_index("Nemotécnico")
+        vista = tabla.drop(columns=["Empresa", "Ticker"]).set_index("Nemotécnico")
         estilo = (
             vista.style
             .map(color, subset=["Var. hoy ($)"] + columnas_pct)
-            .map(lambda v: "background-color: rgba(128, 128, 128, 0.16)",
-                 subset=[col_orden] if col_orden in vista.columns else [])
+            .map(lambda v: "background-color: rgba(128, 128, 128, 0.16)", subset=["YTD (c/div.)"])
             .format({
                 **{c: pct_cl for c in columnas_pct},
                 "Var. hoy ($)": peso_signo_cl,
