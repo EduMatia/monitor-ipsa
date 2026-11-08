@@ -34,7 +34,6 @@ def peso_signo_cl(v):
     return signo + "$" + num_cl(abs(v), 2)
 
 
-@st.cache_data(ttl=3600)
 def cargar_sectores():
     """sector -> (código de 3 letras, color) desde sectores.csv."""
     try:
@@ -45,7 +44,7 @@ def cargar_sectores():
 
 
 @st.cache_data(ttl=86400)
-def logo_de(nemo, sector):
+def logo_de(nemo, codigo, color):
     """Imagen incrustada para cada acción: logos/NEMOTECNICO.png (o .svg/.jpg/.webp) si existe;
     si no, un cuadrado de color con el código de 3 letras de su sector."""
     for ext, mime in [("png", "image/png"), ("svg", "image/svg+xml"), ("jpg", "image/jpeg"),
@@ -54,7 +53,6 @@ def logo_de(nemo, sector):
         if os.path.exists(ruta):
             with open(ruta, "rb") as f:
                 return f"data:{mime};base64," + base64.b64encode(f.read()).decode("ascii")
-    codigo, color = cargar_sectores().get(sector, ("OTR", "#757575"))
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">'
         f'<rect x="3" y="3" width="58" height="58" rx="14" fill="{color}"/>'
@@ -360,7 +358,11 @@ for _, e in empresas.iterrows():
 
 tabla = pd.DataFrame(filas, columns=COLUMNAS)
 tabla = tabla[tabla["Ticker"].isin(emp_f["ticker"])]
-tabla["Logo"] = [logo_de(n, sec) for n, sec in zip(tabla["Nemotécnico"], tabla["Sector"])]
+sectores_map = cargar_sectores()
+tabla["Logo"] = [
+    logo_de(n, *sectores_map.get(sec, ("OTR", "#757575")))
+    for n, sec in zip(tabla["Nemotécnico"], tabla["Sector"])
+]
 tabla[columnas_num] = tabla[columnas_num].astype(float).round(2)
 tabla = tabla.sort_values("YTD (c/div.)", ascending=False).reset_index(drop=True)
 
@@ -451,12 +453,22 @@ with tab1:
                 return ""
             return "color: #1a7f4b" if valor > 0 else "color: #c0392b" if valor < 0 else ""
 
+        ordenables = ["YTD (c/div.)", "YTD (precio)", "Var. hoy", "WTD", "1 semana", "MTD", "1 mes", "1 año",
+                      "Var. hoy ($)", "Precio", "Sector", "Nemotécnico"]
+        c_ord, c_dir, _ = st.columns([2, 2, 3])
+        col_orden = c_ord.selectbox("Ordenar por", ordenables, key="orden_col")
+        sentido = c_dir.radio("Orden", ["Mayor a menor", "Menor a mayor"], horizontal=True, key="orden_dir")
+        tabla_ord = tabla.sort_values(
+            col_orden, ascending=(sentido == "Menor a mayor"), na_position="last", kind="stable"
+        ).reset_index(drop=True)
+
         # el nemotécnico va como índice: queda fijo a la izquierda al desplazar la tabla (útil en el celular)
-        vista = tabla.drop(columns=["Empresa", "Ticker"]).set_index("Nemotécnico")
+        vista = tabla_ord.drop(columns=["Empresa", "Ticker"]).set_index("Nemotécnico")
         estilo = (
             vista.style
             .map(color, subset=["Var. hoy ($)"] + columnas_pct)
-            .set_properties(subset=["YTD (c/div.)"], **{"background-color": "rgba(128,128,128,0.16)", "font-weight": "600"})
+            .map(lambda v: "background-color: rgba(128, 128, 128, 0.16)",
+                 subset=[col_orden] if col_orden in vista.columns else [])
             .format({
                 **{c: pct_cl for c in columnas_pct},
                 "Var. hoy ($)": peso_signo_cl,
@@ -481,6 +493,10 @@ with tab1:
 
         if es_admin:  # solo visible con ?admin=importar al final del link
             with st.expander("Diagnóstico (datos crudos)"):
+                faltan_codigo = sorted(set(empresas["sector"]) - set(sectores_map))
+                st.write(f"sectores.csv: {len(sectores_map)} sectores leídos")
+                if faltan_codigo:
+                    st.write("Sectores de empresas.csv sin código en sectores.csv (salen como OTR):", faltan_codigo)
                 tk = st.selectbox("Acción", emp_f["ticker"], key="diag_tk", format_func=lambda x: x.replace(".SN", ""))
                 st.write("Cotización según Yahoo (precio actual, cierre anterior):", cotizaciones.get(tk))
                 if not cotizaciones.get(tk):
