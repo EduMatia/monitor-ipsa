@@ -1,4 +1,7 @@
+import base64
+import hashlib
 import io
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 
@@ -29,6 +32,36 @@ def peso_signo_cl(v):
         return "—"
     signo = "+" if v > 0 else "-" if v < 0 else ""
     return signo + "$" + num_cl(abs(v), 2)
+
+
+@st.cache_data(ttl=3600)
+def cargar_sectores():
+    """sector -> (código de 3 letras, color) desde sectores.csv."""
+    try:
+        d = pd.read_csv("sectores.csv")
+        return {r["sector"]: (str(r["codigo"]), str(r["color"])) for _, r in d.iterrows()}
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=86400)
+def logo_de(nemo, sector):
+    """Imagen incrustada para cada acción: logos/NEMOTECNICO.png (o .svg/.jpg/.webp) si existe;
+    si no, un cuadrado de color con el código de 3 letras de su sector."""
+    for ext, mime in [("png", "image/png"), ("svg", "image/svg+xml"), ("jpg", "image/jpeg"),
+                      ("jpeg", "image/jpeg"), ("webp", "image/webp")]:
+        ruta = f"logos/{nemo}.{ext}"
+        if os.path.exists(ruta):
+            with open(ruta, "rb") as f:
+                return f"data:{mime};base64," + base64.b64encode(f.read()).decode("ascii")
+    codigo, color = cargar_sectores().get(sector, ("OTR", "#757575"))
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">'
+        f'<rect x="3" y="3" width="58" height="58" rx="14" fill="{color}"/>'
+        '<text x="32" y="40" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="700" '
+        f'letter-spacing="1" fill="white" text-anchor="middle">{codigo}</text></svg>'
+    )
+    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
 
 
 def texto_monto(moneda, v):
@@ -270,8 +303,8 @@ fechas = {
 }
 
 COLUMNAS = [
-    "Empresa", "Nemotécnico", "Ticker", "Sector", "Precio", "Var. hoy ($)", "Var. hoy", "WTD",
-    "1 semana", "MTD", "1 mes", "YTD (precio)", "YTD (c/div.)", "1 año",
+    "Empresa", "Nemotécnico", "Ticker", "Logo", "Precio", "Var. hoy ($)", "Var. hoy", "30 días", "WTD",
+    "1 semana", "MTD", "1 mes", "YTD (precio)", "YTD (c/div.)", "1 año", "Sector",
 ]
 columnas_pct = [
     "Var. hoy", "WTD", "1 semana", "MTD", "1 mes",
@@ -282,7 +315,7 @@ columnas_num = ["Precio", "Var. hoy ($)"] + columnas_pct
 filas = []
 for _, e in empresas.iterrows():
     t = e["ticker"]
-    c = cierre[t].dropna() if t in cierre.columns else pd.Series(dtype=float)
+    c = cierre[t].dropna() if t in cierre.columns else pd.Series(dtype=float, index=pd.DatetimeIndex([]))
     cot = cotizaciones.get(t)
     if cot:
         ultimo, cierre_prev = cot  # precio actual y cierre anterior según Yahoo
@@ -304,6 +337,11 @@ for _, e in empresas.iterrows():
         filas.append(fila)  # la acción aparece igual, sin datos
         continue
     fila["Precio"] = ultimo
+    ultimos_30 = c[c.index >= hoy - pd.Timedelta(days=30)]
+    puntos = [round(float(x), 2) for x in ultimos_30.tolist()]
+    if ultimos_30.empty or ultimos_30.index[-1] < hoy:
+        puntos.append(round(float(ultimo), 2))  # el precio actual cierra la línea
+    fila["30 días"] = puntos if len(puntos) >= 2 else None
     if cierre_prev:
         fila["Var. hoy ($)"] = ultimo - cierre_prev
         fila["Var. hoy"] = (ultimo / cierre_prev - 1) * 100
@@ -322,6 +360,7 @@ for _, e in empresas.iterrows():
 
 tabla = pd.DataFrame(filas, columns=COLUMNAS)
 tabla = tabla[tabla["Ticker"].isin(emp_f["ticker"])]
+tabla["Logo"] = [logo_de(n, sec) for n, sec in zip(tabla["Nemotécnico"], tabla["Sector"])]
 tabla[columnas_num] = tabla[columnas_num].astype(float).round(2)
 tabla = tabla.sort_values("YTD (c/div.)", ascending=False).reset_index(drop=True)
 
@@ -361,7 +400,7 @@ with tab1:
     filas_html = ""
     for _, r in indices.iterrows():
         ti = r["ticker"]
-        ci = cierre[ti].dropna() if ti in cierre.columns else pd.Series(dtype=float)
+        ci = cierre[ti].dropna() if ti in cierre.columns else pd.Series(dtype=float, index=pd.DatetimeIndex([]))
         cot_i = cotizaciones.get(ti)
         if cot_i:
             valor_i = cot_i[0]
@@ -417,13 +456,20 @@ with tab1:
         estilo = (
             vista.style
             .map(color, subset=["Var. hoy ($)"] + columnas_pct)
+            .set_properties(subset=["YTD (c/div.)"], **{"background-color": "rgba(128,128,128,0.16)", "font-weight": "600"})
             .format({
                 **{c: pct_cl for c in columnas_pct},
                 "Var. hoy ($)": peso_signo_cl,
                 "Precio": lambda v: "—" if pd.isna(v) else "$" + num_cl(v, 2),
             })
         )
-        st.dataframe(estilo, use_container_width=True, hide_index=False, height=520)
+        st.dataframe(
+            estilo, use_container_width=True, hide_index=False, height=520,
+            column_config={
+                "Logo": st.column_config.ImageColumn(" ", width="small"),
+                "30 días": st.column_config.LineChartColumn("30 días", width="small"),
+            },
+        )
 
         sin_datos = tabla.loc[tabla["Precio"].isna(), "Nemotécnico"].tolist()
         if sin_datos:
