@@ -23,9 +23,11 @@ def numero(token):
         return None
 
 
-def parsear_pegado(texto, tickers_validos=None):
-    """Devuelve (DataFrame con fecha, ticker, cierre) y una lista de avisos."""
-    filas, avisos = [], []
+def parsear_pegado(texto, tickers_validos=None, ignorar_fecha=None):
+    """Devuelve (DataFrame con fecha, ticker, cierre) y una lista de avisos.
+    ignorar_fecha (AAAA-MM-DD): se omiten las filas de esa fecha (por ejemplo, hoy si el mercado aún no cierra,
+    porque ahí 'Último' es un precio del momento y no un cierre)."""
+    filas, avisos, omitidas = [], [], 0
     ticker = None
     bloques = {}
     for linea in texto.splitlines():
@@ -57,6 +59,10 @@ def parsear_pegado(texto, tickers_validos=None):
                     except ValueError:
                         i += 1
                         continue
+                    if ignorar_fecha and fecha.strftime("%Y-%m-%d") == ignorar_fecha:
+                        omitidas += 1
+                        i += 2
+                        continue
                     filas.append({"fecha": fecha.strftime("%Y-%m-%d"), "ticker": t, "cierre": round(valor, 4)})
                     n += 1
                     i += 2
@@ -64,6 +70,8 @@ def parsear_pegado(texto, tickers_validos=None):
             i += 1
         if n == 0:
             avisos.append(f"{t.replace('.SN', '')}: no encontré filas con fecha y precio.")
+    if omitidas:
+        avisos.append(f"Se omitieron {omitidas} filas de hoy ({ignorar_fecha}): el mercado aún no cierra y ese precio no es un cierre.")
     df = pd.DataFrame(filas, columns=["fecha", "ticker", "cierre"])
     df = df.drop_duplicates(["fecha", "ticker"], keep="last")
     return df, avisos
