@@ -35,29 +35,27 @@ def peso_signo_cl(v):
 
 
 def cargar_sectores():
-    """sector -> (código de 3 letras, color) desde sectores.csv."""
+    """sector -> (código de 3 letras, color, nombre corto) desde sectores.csv."""
     try:
         d = pd.read_csv("sectores.csv")
-        return {r["sector"]: (str(r["codigo"]), str(r["color"])) for _, r in d.iterrows()}
+        if "nombre_corto" not in d:
+            d["nombre_corto"] = d["sector"].str.title().str[:18]
+        return {r["sector"]: (str(r["codigo"]), str(r["color"]), str(r["nombre_corto"])) for _, r in d.iterrows()}
     except Exception:
         return {}
 
 
 @st.cache_data(ttl=86400)
-def logo_de(nemo, codigo, color):
-    """Imagen incrustada para cada acción: logos/NEMOTECNICO.png (o .svg/.jpg/.webp) si existe;
-    si no, un cuadrado de color con el código de 3 letras de su sector."""
-    for ext, mime in [("png", "image/png"), ("svg", "image/svg+xml"), ("jpg", "image/jpeg"),
-                      ("jpeg", "image/jpeg"), ("webp", "image/webp")]:
-        ruta = f"logos/{nemo}.{ext}"
-        if os.path.exists(ruta):
-            with open(ruta, "rb") as f:
-                return f"data:{mime};base64," + base64.b64encode(f.read()).decode("ascii")
+def etiqueta_sector(codigo, color, nombre):
+    """Una sola imagen con el código de 3 letras sobre un recuadro de color y, al lado, el nombre del sector."""
+    nombre = nombre.replace("&", "&amp;").replace("<", "&lt;")
     svg = (
-        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">'
-        f'<rect x="3" y="3" width="58" height="58" rx="14" fill="{color}"/>'
-        '<text x="32" y="40" font-family="Arial, Helvetica, sans-serif" font-size="21" font-weight="700" '
-        f'letter-spacing="1" fill="white" text-anchor="middle">{codigo}</text></svg>'
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="40" viewBox="0 0 200 40">'
+        f'<rect x="2" y="4" width="46" height="32" rx="9" fill="{color}"/>'
+        '<text x="25" y="25.5" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" '
+        f'letter-spacing="0.5" fill="white" text-anchor="middle">{codigo}</text>'
+        '<text x="57" y="25" font-family="Arial, Helvetica, sans-serif" font-size="14" '
+        f'fill="#8a8f98">{nombre}</text></svg>'
     )
     return "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
 
@@ -309,8 +307,8 @@ fechas = {
 }
 
 COLUMNAS = [
-    "Empresa", "Nemotécnico", "Ticker", "Logo", "Precio", "Var. hoy ($)", "Var. hoy", "30 días", "WTD",
-    "1 semana", "MTD", "1 mes", "YTD (precio)", "YTD (c/div.)", "1 año", "Sector",
+    "Empresa", "Nemotécnico", "Ticker", "Precio", "Var. hoy ($)", "Var. hoy", "30 días", "WTD",
+    "1 semana", "MTD", "1 mes", "YTD (precio)", "YTD (c/div.)", "1 año", "Sector", "Logo",
 ]
 columnas_pct = [
     "Var. hoy", "WTD", "1 semana", "MTD", "1 mes",
@@ -375,8 +373,8 @@ tabla = pd.DataFrame(filas, columns=COLUMNAS)
 tabla = tabla[tabla["Ticker"].isin(emp_f["ticker"])]
 sectores_map = cargar_sectores()
 tabla["Logo"] = [
-    logo_de(n, *sectores_map.get(sec, ("OTR", "#757575")))
-    for n, sec in zip(tabla["Nemotécnico"], tabla["Sector"])
+    etiqueta_sector(*sectores_map.get(sec, ("OTR", "#757575", "Otras")))
+    for sec in tabla["Sector"]
 ]
 tabla[columnas_num] = tabla[columnas_num].astype(float).round(2)
 tabla = tabla.sort_values("YTD (c/div.)", ascending=False).reset_index(drop=True)
@@ -471,7 +469,7 @@ with tab1:
             return "color: #1a7f4b" if valor > 0 else "color: #c0392b" if valor < 0 else ""
 
         # el nemotécnico va como índice: queda fijo a la izquierda al desplazar la tabla (útil en el celular)
-        vista = tabla.drop(columns=["Empresa", "Ticker"]).set_index("Nemotécnico")
+        vista = tabla.drop(columns=["Empresa", "Ticker", "Sector"]).set_index("Nemotécnico")
         estilo = (
             vista.style
             .map(color, subset=["Var. hoy ($)"] + columnas_pct)
@@ -489,7 +487,7 @@ with tab1:
         st.dataframe(
             estilo, use_container_width=True, hide_index=False, height=520,
             column_config={
-                "Logo": st.column_config.ImageColumn(" ", width="small"),
+                "Logo": st.column_config.ImageColumn("Sector", width="medium"),
                 "30 días": col_linea,
             },
         )
