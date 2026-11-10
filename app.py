@@ -170,6 +170,45 @@ def cargar_dividendos_anio(tickers, desde):
         return dict(ex.map(uno, tickers))
 
 
+@st.cache_data(ttl=86400)  # el número de acciones casi no cambia: se consulta una vez al día
+def cargar_acciones_emitidas(tickers):
+    def uno(t):
+        tk = yf.Ticker(t)
+        try:
+            v = tk.fast_info["shares"]
+            if v and float(v) > 0:
+                return t, float(v)
+        except Exception:
+            pass
+        try:
+            v = tk.info.get("sharesOutstanding")
+            if v and float(v) > 0:
+                return t, float(v)
+        except Exception:
+            pass
+        return t, None
+
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        return dict(ex.map(uno, tickers))
+
+
+@st.cache_data(ttl=3600)
+def cargar_dolar():
+    """Pesos por dólar: primero Yahoo (CLP=X) y, si falla, mindicador.cl (Banco Central)."""
+    try:
+        v = float(yf.Ticker("CLP=X").fast_info["last_price"])
+        if 300 < v < 3000:
+            return v
+    except Exception:
+        pass
+    try:
+        r = requests.get("https://mindicador.cl/api/dolar", timeout=15)
+        r.raise_for_status()
+        return float(r.json()["serie"][0]["valor"])
+    except Exception:
+        return None
+
+
 @st.cache_data(ttl=300)  # 5 minutos
 def cargar_cotizaciones(tickers):
     """Precio actual y cierre anterior, como los muestra Yahoo en su sitio.
@@ -285,6 +324,13 @@ except Exception as e:
     cotizaciones, motivos_cot = {}, {}
     st.warning(f"No se pudieron consultar los precios actuales: {type(e).__name__}")
 
+try:
+    with st.spinner("Consultando acciones emitidas..."):
+        acciones_emitidas = cargar_acciones_emitidas(tuple(empresas["ticker"]))
+except Exception:
+    acciones_emitidas = {}
+dolar_hoy = cargar_dolar()
+
 div_csv = cargar_dividendos_csv()
 ini_anio = pd.Timestamp(year=hoy.year, month=1, day=1)
 div_ytd = (
@@ -308,13 +354,13 @@ fechas = {
 
 COLUMNAS = [
     "Empresa", "Nemotécnico", "Ticker", "Precio", "Var. hoy ($)", "Var. hoy", "30 días", "WTD",
-    "1 semana", "MTD", "1 mes", "YTD (precio)", "YTD (c/div.)", "1 año", "Sector", "Logo",
+    "1 semana", "MTD", "1 mes", "YTD (precio)", "YTD (c/div.)", "1 año", "Mkt Cap (US$ M)", "Sector", "Logo",
 ]
 columnas_pct = [
     "Var. hoy", "WTD", "1 semana", "MTD", "1 mes",
     "YTD (precio)", "YTD (c/div.)", "1 año",
 ]
-columnas_num = ["Precio", "Var. hoy ($)"] + columnas_pct
+columnas_num = ["Precio", "Var. hoy ($)", "Mkt Cap (US$ M)"] + columnas_pct
 
 filas = []
 for _, e in empresas.iterrows():
@@ -348,6 +394,9 @@ for _, e in empresas.iterrows():
         filas.append(fila)  # la acción aparece igual, sin datos
         continue
     fila["Precio"] = ultimo
+    n_acc = acciones_emitidas.get(t)
+    if n_acc and dolar_hoy:  # acciones emitidas x precio, convertido a dólares y expresado en millones
+        fila["Mkt Cap (US$ M)"] = n_acc * float(ultimo) / dolar_hoy / 1e6
     ultimos_30 = c[c.index >= hoy - pd.Timedelta(days=30)]
     puntos = [round(float(x), 2) for x in ultimos_30.tolist()]
     if ultimos_30.empty or (ultimos_30.index[-1] < hoy and abs(float(ultimos_30.iloc[-1]) - float(ultimo)) > 1e-9):
@@ -478,6 +527,7 @@ with tab1:
                 **{c: pct_cl for c in columnas_pct},
                 "Var. hoy ($)": peso_signo_cl,
                 "Precio": lambda v: "—" if pd.isna(v) else "$" + num_cl(v, 2),
+                "Mkt Cap (US$ M)": lambda v: "—" if pd.isna(v) else num_cl(v, 0 if v >= 10 else 1),
             })
         )
         try:  # línea verde si el gráfico sube y roja si baja (en versiones antiguas de Streamlit no existe 'color')
@@ -506,8 +556,9 @@ with tab1:
                 st.write(f"sectores.csv: {len(sectores_map)} sectores leídos")
                 if faltan_codigo:
                     st.write("Sectores de empresas.csv sin código en sectores.csv (salen como OTR):", faltan_codigo)
-                tk = st.selectbox("Acción", emp_f["ticker"], key="diag_tk", format_func=lambda x: x.replace(".SN", ""))
+                tk = st.selectbox("Acción o índice", list(emp_f["ticker"]) + list(indices["ticker"]), key="diag_tk", format_func=lambda x: x.replace(".SN", ""))
                 st.write("Cotización según Yahoo (precio actual, cierre anterior):", cotizaciones.get(tk))
+                st.write("Acciones emitidas según Yahoo:", acciones_emitidas.get(tk), "| dólar usado:", dolar_hoy)
                 if not cotizaciones.get(tk):
                     st.write("Motivo de la falta de cotización:", motivos_cot.get(tk, "sin información"))
                 st.write("Dividendos del año sumados ($ por acción):", div_yahoo.get(tk))
