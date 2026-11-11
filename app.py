@@ -292,6 +292,7 @@ ahora = pd.Timestamp.now(tz="America/Santiago").tz_localize(None)
 hoy = ahora.normalize()
 # fin de semana, o lunes antes de abrir el mercado: aún no hay una rueda "de hoy"
 sin_rueda_hoy = hoy.weekday() >= 5 or (hoy.weekday() == 0 and ahora.hour < 10)
+cerrado_hoy = hoy.weekday() < 5 and ahora.hour >= 18  # el mercado ya cerró y el script diario guarda el cierre
 ultima_rueda = hoy - pd.Timedelta(days=1)  # último día hábil anterior a hoy (en fin de semana, el viernes)
 while ultima_rueda.weekday() >= 5:
     ultima_rueda -= pd.Timedelta(days=1)
@@ -377,13 +378,21 @@ for _, e in empresas.iterrows():
         ultimo, cierre_prev = c.iloc[-1], c.iloc[-2]  # sin cotización de Yahoo: último cierre guardado si es reciente
     else:
         ultimo = None
-    if sin_rueda_hoy and len(c) >= 2 and c.index[-1] >= ultima_rueda:
-        # mercado cerrado y ya tenemos el cierre de la última rueda: se usa ese y el anterior.
-        # (La cotización de Yahoo en fin de semana puede venir atrasada, por ejemplo con el cierre del jueves.)
+    if len(c) >= 2 and (
+        (sin_rueda_hoy and c.index[-1] >= ultima_rueda)   # fin de semana (o lunes antes de abrir): último cierre guardado
+        or (cerrado_hoy and c.index[-1] == hoy)           # hoy el mercado ya cerró y el cierre de hoy ya está guardado
+    ):
+        # Se usan nuestros dos últimos cierres guardados. La cotización de Yahoo puede venir atrasada o con un
+        # cierre anterior que no coincide con el de la Bolsa (sobre todo en acciones que transan poco).
         ultimo, cierre_prev = c.iloc[-1], c.iloc[-2]
-    elif ultimo is not None and sin_rueda_hoy and len(c) and (hoy - c.index[-1]).days <= 5 \
-            and (cierre_prev is None or abs(ultimo - cierre_prev) < 1e-6) and abs(ultimo - c.iloc[-1]) >= 1e-6:
-        cierre_prev = c.iloc[-1]  # aún no estaba guardado el cierre de la última rueda: se compara con el último guardado
+    elif ultimo is not None and len(c):
+        # Mercado abierto (o aún sin cierre guardado): el "cierre anterior" es el de la rueda anterior que tenemos guardada.
+        anteriores = c[c.index < hoy]
+        if not anteriores.empty and anteriores.index[-1] >= ultima_rueda:
+            cierre_prev = anteriores.iloc[-1]
+        elif sin_rueda_hoy and (hoy - c.index[-1]).days <= 5 \
+                and (cierre_prev is None or abs(ultimo - cierre_prev) < 1e-6) and abs(ultimo - c.iloc[-1]) >= 1e-6:
+            cierre_prev = c.iloc[-1]  # aún no estaba guardado el cierre de la última rueda: se compara con el último guardado
     fila = {
         "Empresa": e["nombre"],
         "Nemotécnico": t.replace(".SN", "").upper(),
