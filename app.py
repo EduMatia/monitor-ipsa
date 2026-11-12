@@ -117,6 +117,66 @@ def cargar_indices():
         return pd.DataFrame(columns=["ticker", "nombre"])
 
 
+@st.cache_data(ttl=300)
+def cargar_fundamentales():
+    """Cifras base por empresa (fundamentales.csv, lo actualiza la tarea semanal)."""
+    try:
+        d = pd.read_csv("fundamentales.csv")
+    except Exception:
+        return {}
+    return {r["ticker"]: r.to_dict() for _, r in d.iterrows()}
+
+
+def _num(x):
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return None
+    return None if pd.isna(x) else x
+
+
+SIN_EBITDA = {"FINANCIALS", "AFP"}  # bancos, seguros y AFP: EBITDA y deuda no aplican
+RATIOS = ["P/E", "P/B", "Div. Yield", "ROE", "Margen neto", "Deuda neta / EBITDA"]
+
+
+def calcular_ratios(f, precio, dolar, sector, div12):
+    """Ratios a partir de las cifras base. Las cifras vienen en la moneda de los estados financieros
+    (pesos o dólares); el precio está en pesos, así que se convierte con el dólar del día antes de dividir."""
+    r = {k: None for k in RATIOS}
+    precio = _num(precio)
+    if precio and div12 is not None and not pd.isna(div12):
+        r["Div. Yield"] = div12 / precio * 100
+    if not f:
+        return r
+    moneda = str(f.get("moneda") or "CLP").upper()
+    fx = 1.0 if moneda == "CLP" else (dolar if moneda == "USD" else None)
+    eps, valor_libro = _num(f.get("eps")), _num(f.get("valor_libro"))
+    if precio and fx:
+        if eps and eps > 0:
+            r["P/E"] = precio / (eps * fx)
+        if valor_libro and valor_libro > 0:
+            r["P/B"] = precio / (valor_libro * fx)
+    # descartar valores absurdos (por ejemplo, por una moneda mal informada)
+    if r["P/E"] is not None and r["P/E"] > 300:
+        r["P/E"] = None
+    if r["P/B"] is not None and r["P/B"] > 50:
+        r["P/B"] = None
+    roe, margen = _num(f.get("roe")), _num(f.get("margen_neto"))
+    if margen is None and _num(f.get("utilidad_neta")) is not None and _num(f.get("ventas")):
+        margen = _num(f["utilidad_neta"]) / _num(f["ventas"])
+    r["ROE"] = None if roe is None else roe * 100
+    r["Margen neto"] = None if margen is None else margen * 100
+    if sector not in SIN_EBITDA:
+        ebitda, deuda, caja = _num(f.get("ebitda")), _num(f.get("deuda")), _num(f.get("caja"))
+        if ebitda and ebitda > 0 and deuda is not None:
+            r["Deuda neta / EBITDA"] = (deuda - (caja or 0.0)) / ebitda
+    return r
+
+
+def color_deuda(v):
+    return "color: #c0392b" if (not pd.isna(v) and v > 3) else ""
+
+
 def color_signo(valor):
     if pd.isna(valor):
         return ""
@@ -439,12 +499,12 @@ tabla = tabla.sort_values("YTD (c/div.)", ascending=False).reset_index(drop=True
 
 # ---------- Pestañas ----------
 es_admin = st.query_params.get("admin") == "importar"  # herramienta privada: agrega ?admin=importar al link
-nombres_tabs = ["Rendimientos", "Gráficos", "Dividendos", "Calendario de resultados"]
+nombres_tabs = ["Rendimientos", "Ratios", "Gráficos", "Dividendos", "Calendario de resultados"]
 if es_admin:
     nombres_tabs.append("Importar (admin)")
 _tabs = st.tabs(nombres_tabs)
-tab1, tab_g, tab2, tab3 = _tabs[:4]
-tab_imp = _tabs[4] if es_admin else None
+tab1, tab_r, tab_g, tab2, tab3 = _tabs[:5]
+tab_imp = _tabs[5] if es_admin else None
 
 # ===== Pestaña 1: Rendimientos =====
 with tab1:
@@ -770,6 +830,56 @@ with tab3:
         sin = base[base[list(PERIODOS)].isna().all(axis=1)]["ticker"].str.replace(".SN", "", regex=False).str.upper().tolist()
         if sin:
             st.caption("Sin fechas en la CMF: " + ", ".join(sin))
+
+# ===== Pestaña Ratios =====
+with tab_r:
+    fundamentales = cargar_fundamentales()
+    if tabla.empty:
+        st.warning("No hay datos de precios para mostrar.")
+    elif not fundamentales:
+        st.info("Aún no hay datos fundamentales cargados.")
+    else:
+        hace_un_ano = hoy - pd.DateOffset(years=1)
+        div12_csv = (
+            div_csv[(div_csv["fecha_corte"] >= hace_un_ano) & (div_csv["fecha_corte"] < hoy)]
+            .groupby("ticker")["monto_por_accion"].sum()
+        )
+        con_dividendos_csv = set(div_csv["ticker"])
+        filas_r = []
+        for _, fila_t in tabla.iterrows():
+            t = fila_t["Ticker"]
+            f = fundamentales.get(t)
+            if t in con_dividendos_csv:  # lo cargado desde la Bolsa tiene prioridad sobre Yahoo
+                div12 = float(div12_csv.get(t, 0.0))
+            else:
+                div12 = _num(f.get("div_12m")) if f else None
+            r = calcular_ratios(f, fila_t["Precio"], dolar_hoy, fila_t["Sector"], div12)
+            filas_r.append({
+                "Nemotécnico": fila_t["Nemotécnico"], **r,
+                "Mkt Cap (US$ M)": fila_t["Mkt Cap (US$ M)"], "Sector": fila_t["Logo"],
+            })
+        ratios = (
+            pd.DataFrame(filas_r)
+            .sort_values("Mkt Cap (US$ M)", ascending=False, na_position="last")
+            .set_index("Nemotécnico")
+        )
+        numericas = RATIOS + ["Mkt Cap (US$ M)"]
+        ratios[numericas] = ratios[numericas].astype(float).round(2)
+        veces = lambda v: "—" if pd.isna(v) else num_cl(v, 1) + "x"
+        porc = lambda v: "—" if pd.isna(v) else num_cl(v, 1) + "%"
+        estilo_r = (
+            ratios.style
+            .map(color_deuda, subset=["Deuda neta / EBITDA"])
+            .format({
+                "P/E": veces, "P/B": veces, "Deuda neta / EBITDA": veces,
+                "Div. Yield": porc, "ROE": porc, "Margen neto": porc,
+                "Mkt Cap (US$ M)": lambda v: "—" if pd.isna(v) else num_cl(v, 0 if v >= 10 else 1),
+            })
+        )
+        st.dataframe(
+            estilo_r, use_container_width=True, hide_index=False, height=520,
+            column_config={"Sector": st.column_config.ImageColumn("Sector", width="medium")},
+        )
 
 # ===== Pestaña Gráficos =====
 with tab_g:
