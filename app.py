@@ -535,24 +535,39 @@ with tab1:
         ti = r["ticker"]
         ci = cierre[ti].dropna() if ti in cierre.columns else pd.Series(dtype=float, index=pd.DatetimeIndex([]))
         cot_i = cotizaciones.get(ti)
-        if sin_rueda_hoy and len(ci) and ci.index[-1] >= ultima_rueda:
-            valor_i = ci.iloc[-1]  # mercado cerrado: cierre guardado de la última rueda
+        prev_i = None
+        usar_guardados = len(ci) >= 2 and (
+            (sin_rueda_hoy and ci.index[-1] >= ultima_rueda)   # fin de semana: último cierre guardado
+            or (cerrado_hoy and ci.index[-1] == hoy)           # hoy ya cerró y el cierre de hoy está guardado
+        )
+        if usar_guardados:
+            valor_i, prev_i = ci.iloc[-1], ci.iloc[-2]
         elif cot_i:
             valor_i = cot_i[0]
+            anteriores_i = ci[ci.index < hoy]
+            if not anteriores_i.empty and anteriores_i.index[-1] >= ultima_rueda:
+                prev_i = anteriores_i.iloc[-1]  # cierre guardado de la rueda anterior
+            elif cot_i[1]:
+                prev_i = cot_i[1]               # si no lo tenemos guardado, el que entrega Yahoo
         elif len(ci) and (hoy - ci.index[-1]).days <= 7:
             valor_i = ci.iloc[-1]  # sin cotización de Yahoo: último cierre guardado si es reciente
         else:
             valor_i = None
-        sem_i = anual_i = None
+        dia_i = sem_i = anual_i = None
         if valor_i is not None:
+            if prev_i:
+                dia_i = (valor_i / prev_i - 1) * 100
             sem_i = retorno(ci, fechas["WTD"], valor_i, 6)
             anual_i = retorno(ci, fechas["YTD (precio)"], valor_i, 10)
         valor_txt = "—" if valor_i is None else num_cl(valor_i, 2)
-        filas_html += f'<tr><td class="nom">{r["nombre"]}</td><td>{valor_txt}</td>{celda_pct(sem_i)}{celda_pct(anual_i)}</tr>'
+        filas_html += (
+            f'<tr><td class="nom">{r["nombre"]}</td><td>{valor_txt}</td>'
+            f'{celda_pct(dia_i)}{celda_pct(sem_i)}{celda_pct(anual_i)}</tr>'
+        )
     html_indices = (
         css_indices
         + '<div class="idx-titulo">Principales índices de Chile</div>'
-        + '<table class="idx"><thead><tr><th></th><th>Valor</th><th>Var. semanal</th><th>Var. anual</th></tr></thead>'
+        + '<table class="idx"><thead><tr><th></th><th>Valor</th><th>Var. diaria</th><th>Var. semanal</th><th>Var. anual</th></tr></thead>'
         + f"<tbody>{filas_html}</tbody></table>"
     )
 
